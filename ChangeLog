@@ -1,0 +1,92 @@
+
+2009-03-30 sd-reader
+	* Make 8.3 basename and/or extension lowercase when told by Windows NT and later.
+	* Add ATmega328 pin configuration.
+	* Fix MMC/SD/SDHC distinction.
+	* Fix raw block read/write buffering (thanks to Kurt Sterckx).
+	* Fix fat size calculation for FAT16 when configured with FAT32.
+	* Fix compilation for read-only configurations.
+	* Fix card lock detection.
+	* Make it easier to link with a C++ application.
+
+2008-11-21 sd-reader
+	* Support for SDHC cards (disabled by default).
+	* Support for FAT32 (disabled by default).
+
+2008-06-08 sd-reader
+	* New "init" command to allow reinitialization of memory card.
+	* Fix searching through multi-cluster directories.
+	* Fix reading directory entries spanning a cluster border (backport from mega-eth).
+	* Do not abort the whole lfn entry when the file name is too long, just drop single characters (backport from mega-eth).
+	* Change fat16_get_dir_entry_of_path() to ignore a slash at the end (backport from mega-eth).
+	* Make listing a directory's content much faster (backport from mega-eth).
+	* Shrink code size by centralizing cluster offset calculation (backport from mega-eth).
+	* Some other small fixes and optimizations.
+
+2007-12-13 sd-reader
+	* Dual-license the major implementation modules under GPL and LGPL.
+
+2007-06-03 sd-reader
+	* Fix reading beyond cached block (by Benjamin Meier).
+	* Implement support for reading and writing file modification dates/times.
+	  (Thanks to Torsten Seeboth for testing.)
+
+2007-03-01 sd-reader
+	* Avoid LFN directory entries for the "." and ".." directory references.
+	  This prevented Windows from deleting directories.
+	* Handle special case where the 8.3 filename begins with 0xe5.
+	* Fix return value of fat16_delete_file() when deleting empty files.
+	* Fix fat16_clear_cluster() which was zeroing only 16 of every 32 bytes.
+
+2007-01-20 sd-reader
+	* Fix directory creation.
+	  - Correctly create "." and ".." directory entries (8.3 <-> lfn versions).
+	  - Correctly clear cluster containing the directory entries for new directory.
+
+2006-11-01 sd-reader
+	* Implement creation and deletion of directories.
+	* Clear the directory entries of new directory clusters.
+	* Prevent linkage against printf().
+	* Make the use of malloc()/free() optional.
+
+2006-09-01 sd-reader
+	* Fix shortening files.
+	* Fix free disk space calculation.
+
+2006-08-24 sd-reader
+	* Improve sleep handling.
+	* Display extended card information on boot and
+	  when executing the "disk" shell command.
+	* Correctly determine FAT type by cluster count.
+	* Fix cluster allocation beyond card capacity.
+
+2006-08-16 sd-reader
+	* Provide FAT16 capacity and usage information.
+	* Implement the backspace key in the mini shell.
+	* Enter idle mode when waiting for uart activity.
+	* Make the Card Select pin MCU dependent as well.
+	* Add mini shell commands to documentation.
+
+2006-08-08 sd-reader
+	* Thanks go to Torsten Seeboth for his ongoing efforts
+	  to test changes, fix regressions and give suggestions.
+	  Many of the changes below were initiated by him.
+	* Much more reliable card initialization.
+	* Highly improved performance
+	  - optional write buffering
+	  - better cluster handling
+	  - remove unneeded SPI access when reading from buffered block
+	  - use highest spi frequency after card initialization
+	* Add superfloppy support.
+	* Better checks when opening a FAT16 filesystem.
+	* Provide SPI pin mappings for commonly used ATmegas.
+	* Fix resizing files, hangs could occur.
+	* Fix overflow when creating files with names longer than 31 characters.
+	* Fix numerous other small things.
+
+2006-03-19 sd-reader
+	* Fix speed regressions.
+
+2006-03-16 sd-reader
+	* Initial release.
+
