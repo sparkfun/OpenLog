@@ -1,1 +1,8 @@
-OpenLog is an open source project to create a simple to use data logger. We hope to support FAT16 and FAT32.
+OpenLog is an open source project to create a simple to use data logger. 
+
+OpenLog currently supports FAT16 and hopefully FAT32 soon.
+
+The hardware design is released under CC-SA v3 license.
+The FAT16/FAT32 firmware was originally designed by Roland Riegel and is released under the GPL v2 license.
+The OpenLog firmware was modified by SparkFun Electronics.
+
