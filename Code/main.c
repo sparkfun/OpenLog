@@ -70,12 +70,30 @@
 	TX-O pin will not be greater than 3.3V. This may cause problems with some systems - for example if your
 	attached microcontroller requires 4V minimum for serial communication (this is rare).
 	
+	v1.1
+	Adding better defines for EEPROM settings
+	Adding new log and sequential log functions.
+	
+	Code is acting very weird with what looks to be stack crashes. I can get around this by turning the optimizer off ('0').
+	Found an error : EEPROM functions fail when optimizer is set to '0' or '1'. 
+	sd-reader_config.h contains flag for USE_DYNAMIC_MEMORY
+	
+	Looks like tweaking the optimization higher causes the asm("nop"); to fail inside the append_file routine. Changing this to
+	delay_us(1); works.
+	
+	I have a sneaking suspicion that I was having buffer overrun problems when defining the input_buffer at 1024 bytes. The
+	ATmega328 should have enough RAM (2K) but weird reset errors were occuring. With the buffer at 512bytes, append_file runs 
+	just fine and is able to log at 115200 at a constant data rate.
+	
+	Added file called 'lots-o-text.txt' to version control. This text contains easy to scan text to be used for full data
+	rate checking and testing.	
 */
 
 #include <string.h>
+#include <stdio.h>
 #include <avr/pgmspace.h>
-#include <avr/sleep.h>
 #include <avr/interrupt.h>
+
 #include "fat.h"
 #include "fat_config.h"
 #include "partition.h"
@@ -285,11 +303,21 @@ static uint8_t print_disk_info(const struct fat_fs_struct* fs);
 void ioinit(void);
 void print_menu(void);
 void init_media(void);
-void config_menu(void);
+void baud_menu(void);
+void system_menu(void);
 uint8_t read_buffer(char* buffer, uint8_t buffer_length);
+uint8_t append_file(char* file_name);
+void newlog(void);
+void seqlog(void);
+void command_shell(void);
+
+void blink_error(uint8_t ERROR_TYPE);
 
 void EEPROM_write(uint16_t uiAddress, unsigned char ucData);
 unsigned char EEPROM_read(uint16_t uiAddress);
+
+void delay_us(uint16_t x);
+void delay_ms(uint16_t x);
 
 #define sbi(port, port_pin)   ((port) |= (uint8_t)(1 << port_pin))
 #define cbi(port, port_pin)   ((port) &= (uint8_t)~(1 << port_pin))
@@ -302,21 +330,28 @@ unsigned char EEPROM_read(uint16_t uiAddress);
 #define STAT2	5
 #define STAT2_PORT	PORTB
 
-void blink_error(uint8_t ERROR_TYPE);
-
 #define ERROR_SD_INIT	3
 #define ERROR_NEW_BAUD	5
 
-void delay_us(uint16_t x);
-void delay_ms(uint16_t x);
+#define LOCATION_BAUD_SETTING	0x01
+#define LOCATION_SYSTEM_SETTING	0x02
+#define LOCATION_FILE_NUMBER	0x03
 
+#define BAUD_2400	0
+#define BAUD_9600	1
+#define BAUD_57600	2
+#define BAUD_115200	3
+
+#define MODE_NEWLOG	0
+#define MODE_SEQLOG 1
+#define MODE_COMMAND 2
 
 //Global variables
 struct fat_fs_struct* fs;
 struct partition_struct* partition;
 struct fat_dir_struct* dd;
 
-#define BUFF_LEN 1024
+#define BUFF_LEN 512
 char input_buffer[BUFF_LEN];
 uint16_t read_spot, checked_spot;
 
@@ -327,7 +362,7 @@ ISR(USART_RX_vect)
 {
 	input_buffer[read_spot] = UDR0;
 	read_spot++;
-	PORTD ^= (1<<STAT2); //Toggle the STAT2 LED each time we receive a character
+	STAT1_PORT ^= (1<<STAT1); //Toggle the STAT1 LED each time we receive a character
 	if(read_spot == BUFF_LEN) read_spot = 0;
 }
 
@@ -335,22 +370,180 @@ int main(void)
 {
 	ioinit();
 
-	//Ctrl+z == 26
+	//Determine the system mode we should be in
+	uint8_t system_mode;
+	system_mode = EEPROM_read(LOCATION_SYSTEM_SETTING);
+	if(system_mode > 5) 
+	{
+		system_mode = MODE_NEWLOG; //By default, unit will turn on and go to new file logging
+		EEPROM_write(LOCATION_SYSTEM_SETTING, MODE_NEWLOG);
+	}
 
-	/* provide a simple shell */
+	//If we are in new log mode, find a new file name to write to
+	if(system_mode == MODE_NEWLOG)
+		newlog();
+
+	//If we are in sequential log mode, determine if seqlog.txt has been created or not, and then open it for logging
+	if(system_mode == MODE_SEQLOG)
+		seqlog();
+	
+	//Once either one of these modes exits, go to normal command mode, which is called by returning to main()
+	command_shell();
+
+    return 0;
+}
+
+void ioinit(void)
+{
+    //Init Timer0 for delay_us
+    //TCCR0B = (1<<CS00); //Set Prescaler to clk/1 (assume we are running at internal 1MHz). CS00=1 
+    TCCR0B = (1<<CS01); //Set Prescaler to clk/8 : 1click = 1us(assume we are running at internal 8MHz). CS01=1 
+    //Since we are running at 16MHz, this is a hack job. We will double the count during delay_us function.
+	//TCCR0B = (1<<CS01)|(1<<CS00); //Set Prescaler to clk/64
+
+    //1 = output, 0 = input
+    DDRD |= (1<<STAT1); //PORTD (STAT1 on PD5)
+    DDRB |= (1<<STAT2); //PORTC (STAT2 on PB5)
+
+	//Check to see if we need an emergency UART reset
+	DDRD |= (1<<0); //Turn the RX pin into an input
+	PORTD |= (1<<0); //Push a 1 onto RX pin to enable internal pull-up
+	if( (PIND & (1<<0)) == 0) //Now check the RX pin. If it's being held low
+	{
+		//Wait 2 seconds, blinking LEDs while we wait
+		sbi(PORTC, STAT2); //Set the STAT2 LED
+		for(uint8_t i = 0 ; i < 40 ; i++)
+		{
+			delay_ms(25);
+			PORTD ^= (1<<STAT1); //Blink the stat LEDs
+			delay_ms(25);
+			PORTB ^= (1<<STAT2); //Blink the stat LEDs
+		}
+		
+		//Check pin again
+		if( (PIND & (1<<0)) == 0)
+		{
+			//If the pin is still low, then reset UART to 9600bps
+			EEPROM_write(0x01, 1);
+
+			//Now sit in forever loop indicating system is now at 9600bps
+			sbi(PORTD, STAT1); 
+			sbi(PORTB, STAT2);
+			while(1)
+			{
+				delay_ms(500);
+				PORTD ^= (1<<STAT1); //Blink the stat LEDs
+				PORTB ^= (1<<STAT2); //Blink the stat LEDs
+			}
+		}
+	}
+
+	//Read what the current UART speed is from EEPROM memory
+	uint8_t uart_speed;
+	uart_speed = EEPROM_read(LOCATION_BAUD_SETTING);
+	if(uart_speed > 5) 
+	{
+		uart_speed = BAUD_9600; //Reset UART to 9600 if there is no speed stored
+		EEPROM_write(LOCATION_BAUD_SETTING, BAUD_9600);
+	}
+
+    //Setup uart
+    uart_init(uart_speed);
+#if DEBUG
+	uart_puts_p(PSTR("UART Init\n"));
+#else
+	uart_puts_p(PSTR("1"));
+#endif
+	
+	//Setup SPI, init SD card, etc
+	init_media();
+	uart_puts_p(PSTR("2"));
+}
+
+//Log to the same file every time the system boots, sequentially
+//Checks to see if the file SEQLOG.txt is available
+//If not, create it
+//If yes, append to it
+//Return 0 on error
+//Return anything else on sucess
+void seqlog(void)
+{
+	char seq_file_name[13];
+	sprintf(seq_file_name, "SEQLOG.txt");
+
+	struct fat_file_struct* fd = open_file_in_dir(fs, dd, seq_file_name);
+	if(!fd)
+	{
+		uart_puts_p(PSTR("Creating SEQLOG\n"));
+
+		struct fat_dir_entry_struct file_entry;
+		if(!fat_create_file(dd, seq_file_name, &file_entry))
+		{
+			uart_puts_p(PSTR("Error creating SEQLOG\n"));
+			return;
+		}
+	}
+
+	fat_close_file(fd); //Close the file so we can re-open it in append_file
+
+	append_file(seq_file_name);
+}
+
+//Log to a new file everytime the system boots
+//Checks the spots in EEPROM for the next available LOG# file name
+//Updates EEPROM and then appends to the new log file.
+//Currently limited to 255 files but this should not always be the case.
+void newlog(void)
+{
+	uint8_t new_file_number;
+	new_file_number = EEPROM_read(LOCATION_FILE_NUMBER);
+
+	if(new_file_number == 255) 
+	{
+		new_file_number = 0; //By default, unit will start at file number zero
+		EEPROM_write(LOCATION_FILE_NUMBER, new_file_number);
+	}
+
+	char new_file_name[13];
+	sprintf(new_file_name, "LOG%03d.txt", new_file_number);
+
+	struct fat_dir_entry_struct file_entry;
+	while(!fat_create_file(dd, new_file_name, &file_entry))
+	{
+		//Increment the file number because this file name is already taken
+		new_file_number++;
+
+		sprintf(new_file_name, "LOG%03d.txt", new_file_number);
+	}
+
+	//Record new_file number to EEPROM
+	EEPROM_write(LOCATION_FILE_NUMBER, new_file_number++); //Add one the new_file_number for the next power-up
+	
+#if DEBUG
+	uart_puts_p(PSTR("\nCreated new file: "));
+	uart_puts(new_file_name);
+	uart_puts_p(PSTR("\n"));
+#endif
+
+	//Begin writing to file
+	append_file(new_file_name);
+}
+
+void command_shell(void)
+{
+	//provide a simple shell
 	char buffer[24];
 	while(1)
 	{
-		/* print prompt */
+		//print prompt
 		uart_putc('>');
-		//uart_putc(' ');
 
-		/* read command */
+		//read command
 		char* command = buffer;
 		if(read_line(command, sizeof(buffer)) < 1)
 			continue;
 
-		/* execute command */
+		//execute command
 		if(strcmp_P(command, PSTR("init")) == 0)
 		{
 			uart_puts_p(PSTR("Closing down file system\n"));
@@ -376,10 +569,15 @@ int main(void)
 			//Print available commands
 			print_menu();
 		}
+		else if(strcmp_P(command, PSTR("baud")) == 0)
+		{
+			//Go into baud select menu
+			baud_menu();
+		}
 		else if(strcmp_P(command, PSTR("set")) == 0)
 		{
-			//Go into configure mode
-			config_menu();
+			//Go into system setting menu
+			system_menu();
 		}
 		else if(strncmp_P(command, PSTR("cd "), 3) == 0)
 		{
@@ -550,139 +748,16 @@ int main(void)
 
 			fat_close_file(fd);
 		}
+
 		else if(strncmp_P(command, PSTR("append "), 7) == 0)
 		{
-			//File the end of a current file and begins writing to it
+			//Find the end of a current file and begins writing to it
 			//Ends only when the user inputs Ctrl+z (ASCII 26)
 			command += 7;
 			if(command[0] == '\0')
 				continue;
-
-			char* offset_value = command;
-			while(*offset_value != ' ' && *offset_value != '\0')
-				++offset_value;
-
-			/* search file in current directory and open it */
-			struct fat_file_struct* fd = open_file_in_dir(fs, dd, command);
-			if(!fd)
-			{
-				uart_puts_p(PSTR("error opening "));
-				uart_puts(command);
-				uart_putc('\n');
-				continue;
-			}
-	
-#if DEBUG
-			uart_puts_p(PSTR("File open\n"));
-#endif
-			int32_t offset = 0;
-			//Seeks the end of the file : offset = EOF location
-			if(!fat_seek_file(fd, &offset, FAT_SEEK_END))
-			{
-				uart_puts_p(PSTR("error seeking on "));
-				uart_puts(command);
-				uart_putc('\n');
-
-				fat_close_file(fd);
-				continue;
-			}
-
-#if DEBUG
-			uart_puts_p(PSTR("Recording\n"));
-#endif
-			/* give a different prompt */
-			uart_putc('<');
-			//uart_putc(' ');
-
-			sbi(STAT1_PORT, STAT1); //Turn on indicator LED
-
-			read_spot = 0;
-			checked_spot = 0;
-
-			//Clear circular buffer
-			for(uint16_t i = 0 ; i < BUFF_LEN ; i++)
-				input_buffer[i] = 0;
 				
-			//Start UART buffered interrupts
-			UCSR0B |= (1<<RXCIE0); //Enable receive interrupts
-			sei(); //Enable interrupts
-			
-			//Start checking buffer
-			//This gets kind of wild. We receive characters up to 115200bps using the UART interrupt
-			//They get stored in one big array 1024 wide. As the array fills, we store half the array (512 bytes)
-			//at a time so that we are storing half the array while the other half is filling.
-			
-			while(1)
-			{
-				while(checked_spot == read_spot) asm("nop"); //Hang out while we wait for the interrupt to occur and advance read_spot
-
-				if(input_buffer[checked_spot] == 26) //Scan for escape character
-				{
-					//Disable interrupt and we're done!
-					cli();
-					UCSR0B &= ~(1<<RXCIE0); //Clear receive interrupt enable
-					
-					break;
-				}
-				
-				checked_spot++;
-
-				if(checked_spot == (BUFF_LEN/2)) //We've finished checking the first half the buffer
-				{
-					//Record first half the buffer
-					if(fat_write_file(fd, (uint8_t*) input_buffer, (BUFF_LEN/2) ) != (BUFF_LEN/2) )
-					{
-						uart_puts_p(PSTR("error writing to file\n"));
-						break;
-					}
-				}
-
-				if(checked_spot == BUFF_LEN) //We've finished checking the second half the buffer
-				{
-					checked_spot = 0;
-					
-					//Record second half the buffer
-					if(fat_write_file(fd, (uint8_t*) input_buffer + (BUFF_LEN/2), (BUFF_LEN/2) ) != (BUFF_LEN/2) )
-					{
-						uart_puts_p(PSTR("error writing to file\n"));
-						break;
-					}
-				}
-				
-			}
-
-			//Upon receiving the escape character, we may still have stuff left in the buffer
-			//Record the last of the buffer to memory
-			if(checked_spot == 0 || checked_spot == 512)
-			{
-				//Do nothing, we already recorded the buffers right before catching the escape character
-			}
-			else if(checked_spot < (BUFF_LEN/2))
-			{
-				//Record first half the buffer
-				if(fat_write_file(fd, (uint8_t*) input_buffer, checked_spot) != checked_spot)
-				{
-					uart_puts_p(PSTR("error writing to file\n"));
-					break;
-				}
-			}
-			else //checked_spot > 512
-			{
-				//Record second half the buffer
-				if(fat_write_file(fd, (uint8_t*) input_buffer + (BUFF_LEN/2), (checked_spot - (BUFF_LEN/2)) ) != (checked_spot - (BUFF_LEN/2)) )
-				{
-					uart_puts_p(PSTR("error writing to file\n"));
-					break;
-				}
-			}
-
-			fat_close_file(fd);
-
-			if(!sd_raw_sync())
-				uart_puts_p(PSTR("error syncing disk\n"));
-			
-			cbi(STAT1_PORT, STAT1); //Turn off indicator LED
-
+			append_file(command); //Uses circular buffer to capture full stream of text and append to file
 		}
 		else if(strncmp_P(command, PSTR("md "), 3) == 0)
 		{
@@ -713,89 +788,140 @@ int main(void)
 			uart_putc('\n');
 		}
     }
-
+	
 	//Do we ever get this far?
-
 	uart_puts_p(PSTR("Exiting: closing down\n"));
-
-	/* close file system */
-	fat_close(fs);
-
-	/* close partition */
-	partition_close(partition);
-    
-    return 0;
 }
 
-void ioinit(void)
+
+//Appends a stream of serial data to a given file
+//We use the RX interrupt and a circular buffer of 1024 bytes so that we can capture a full stream of 
+//data even at 115200bps
+//Does not exit until Ctrl+z (ASCII 26) is received
+//Returns 0 on error
+//Returns 1 on success
+uint8_t append_file(char* file_name)
 {
-    /* we will just use ordinary idle mode */
-    set_sleep_mode(SLEEP_MODE_IDLE);
 
-    //Init Timer0 for delay_us
-    //TCCR0B = (1<<CS00); //Set Prescaler to clk/1 (assume we are running at internal 1MHz). CS00=1 
-    TCCR0B = (1<<CS01); //Set Prescaler to clk/8 : 1click = 1us(assume we are running at internal 8MHz). CS01=1 
-    //Since we are running at 16MHz, this is a hack job. We will double the count during delay_us function.
-	
-	//TCCR0B = (1<<CS01)|(1<<CS00); //Set Prescaler to clk/64
-
-    //1 = output, 0 = input
-    DDRD |= (1<<STAT1); //PORTD (STAT1 on PD5)
-    DDRB |= (1<<STAT2); //PORTC (STAT2 on PB5)
-
-	//Check to see if we need an emergency UART reset
-	DDRD |= (1<<0); //Turn the RX pin into an input
-	PORTD |= (1<<0); //Push a 1 onto RX pin to enable internal pull-up
-	if( (PIND & (1<<0)) == 0) //Now check the RX pin. If it's being held low
+	//search file in current directory and open it 
+	struct fat_file_struct* fd = open_file_in_dir(fs, dd, file_name);
+	if(!fd)
 	{
-		//Wait 2 seconds, blinking LEDs while we wait
-		sbi(PORTC, STAT2); //Set the STAT2 LED
-		for(uint8_t i = 0 ; i < 40 ; i++)
+		uart_puts_p(PSTR("error opening "));
+		uart_puts(file_name);
+		uart_putc('\n');
+		return(0);
+	}
+
+#if DEBUG
+	uart_puts_p(PSTR("File open\n"));
+#endif
+	int32_t offset = 0;
+	//Seeks the end of the file : offset = EOF location
+	if(!fat_seek_file(fd, &offset, FAT_SEEK_END))
+	{
+		uart_puts_p(PSTR("error seeking on "));
+		uart_puts(file_name);
+		uart_putc('\n');
+
+		fat_close_file(fd);
+		return(0);
+	}
+
+#if DEBUG
+	uart_puts_p(PSTR("Recording\n"));
+#endif
+	//give a different prompt to indicate no echoing
+	uart_putc('<');
+
+	sbi(STAT1_PORT, STAT1); //Turn on indicator LED
+
+	read_spot = 0;
+	checked_spot = 0;
+
+	//Clear circular buffer
+	for(uint16_t i = 0 ; i < BUFF_LEN ; i++)
+		input_buffer[i] = 0;
+		
+	//Start UART buffered interrupts
+	UCSR0B |= (1<<RXCIE0); //Enable receive interrupts
+	sei(); //Enable interrupts
+	
+	//Start checking buffer
+	//This gets kind of wild. We receive characters up to 115200bps using the UART interrupt
+	//They get stored in one big array 1024 wide. As the array fills, we store half the array (512 bytes)
+	//at a time so that we are storing half the array while the other half is filling.
+
+	while(1)
+	{
+//fail		while(checked_spot == read_spot) asm("nop"); //Hang out while we wait for the interrupt to occur and advance read_spot
+		while(checked_spot == read_spot) delay_us(1); //Hang out while we wait for the interrupt to occur and advance read_spot
+
+		if(input_buffer[checked_spot] == 26) //Scan for escape character
 		{
-			delay_ms(25);
-			PORTD ^= (1<<STAT1); //Blink the stat LEDs
-			delay_ms(25);
-			PORTB ^= (1<<STAT2); //Blink the stat LEDs
+			//Disable interrupt and we're done!
+			cli();
+			UCSR0B &= ~(1<<RXCIE0); //Clear receive interrupt enable
+			
+			break;
 		}
 		
-		//Check pin again
-		if( (PIND & (1<<0)) == 0)
-		{
-			//If the pin is still low, then reset UART to 9600bps
-			EEPROM_write(0x01, 1);
+		checked_spot++;
 
-			//Now sit in forever loop indicating system is now at 9600bps
-			sbi(PORTD, STAT1); 
-			sbi(PORTB, STAT2);
-			while(1)
+		if(checked_spot == (BUFF_LEN/2)) //We've finished checking the first half the buffer
+		{
+			//Record first half the buffer
+			if(fat_write_file(fd, (uint8_t*) input_buffer, (BUFF_LEN/2) ) != (BUFF_LEN/2) )
 			{
-				delay_ms(500);
-				PORTD ^= (1<<STAT1); //Blink the stat LEDs
-				PORTB ^= (1<<STAT2); //Blink the stat LEDs
+				uart_puts_p(PSTR("error writing to file\n"));
+				break;
+			}
+		}
+
+		if(checked_spot == BUFF_LEN) //We've finished checking the second half the buffer
+		{
+			checked_spot = 0;
+			
+			//Record second half the buffer
+			if(fat_write_file(fd, (uint8_t*) input_buffer + (BUFF_LEN/2), (BUFF_LEN/2) ) != (BUFF_LEN/2) )
+			{
+				uart_puts_p(PSTR("error writing to file\n"));
+				break;
 			}
 		}
 	}
 
-	//Read what the current UART speed is from EEPROM memory
-	uint8_t uart_speed;
-	uart_speed = EEPROM_read(0x01);
-	if(uart_speed > 5) 
+	//Upon receiving the escape character, we may still have stuff left in the buffer
+	//Record the last of the buffer to memory
+	if(checked_spot == 0 || checked_spot == (BUFF_LEN/2))
 	{
-		uart_speed = 1; //Reset UART to 9600 if there is no speed stored
-		EEPROM_write(0x01, 1);
+		//Do nothing, we already recorded the buffers right before catching the escape character
+	}
+	else if(checked_spot < (BUFF_LEN/2))
+	{
+		//Record first half the buffer
+		if(fat_write_file(fd, (uint8_t*) input_buffer, checked_spot) != checked_spot)
+			uart_puts_p(PSTR("error writing to file\n"));
+	}
+	else //checked_spot > (BUFF_LEN/2)
+	{
+		//Record second half the buffer
+		if(fat_write_file(fd, (uint8_t*) input_buffer + (BUFF_LEN/2), (checked_spot - (BUFF_LEN/2)) ) != (checked_spot - (BUFF_LEN/2)) )
+			uart_puts_p(PSTR("error writing to file\n"));
 	}
 
-    //Setup uart
-    uart_init(uart_speed);
+	fat_close_file(fd);
+
+	cbi(STAT1_PORT, STAT1); //Turn off indicator LED
+
 #if DEBUG
-	uart_puts_p(PSTR("UART Init\n"));
+	uart_puts_p(PSTR("Done!\n"));
 #endif
-	uart_puts_p(PSTR("1"));
+	uart_puts_p(PSTR("~")); //Indicate a successful record
 	
-	//Setup SPI, init SD card, etc
-	init_media();
-	uart_puts_p(PSTR("2"));
+	return(1); //Success!
 }
+
 
 //Inits the SD interface, opens file system, opens root dir, and checks card info if wanted
 void init_media(void)
@@ -890,6 +1016,7 @@ uint8_t read_line(char* buffer, uint8_t buffer_length)
     while(read_length < buffer_length - 1)
     {
 		PORTD ^= (1<<STAT1); //Blink the stat LED while typing
+PORTB ^= (1<<STAT2); //Blink the stat LED while typing
 
         uint8_t c = uart_getc();
 
@@ -925,6 +1052,27 @@ uint8_t read_line(char* buffer, uint8_t buffer_length)
     return read_length;
 }
 
+//Basic EEPROM functions to read/write to the internal EEPROM
+void EEPROM_write(uint16_t uiAddress, unsigned char ucData)
+{
+	while(EECR & (1<<EEPE)); //Wait for completion of previous write
+	EEARH = uiAddress >> 8; //Set up address and data registers
+	EEARL = uiAddress; //Set up address and data registers
+	EEDR = ucData;
+	EECR |= (1<<EEMPE); //Write logical one to EEMWE
+	EECR |= (1<<EEPE); //Start eeprom write by setting EEWE
+}
+
+unsigned char EEPROM_read(uint16_t uiAddress)
+{
+	while(EECR & (1<<EEPE)); //Wait for completion of previous write
+	EEARH = uiAddress >> 8; //Set up address and data registers
+	EEARL = uiAddress; //Set up address and data registers
+	EECR |= (1<<EERE); //Start eeprom read by writing EERE
+	return EEDR; //Return data from data register
+}
+
+
 //Blinks the status LEDs to indicate a type of error
 void blink_error(uint8_t ERROR_TYPE)
 {
@@ -940,7 +1088,6 @@ void blink_error(uint8_t ERROR_TYPE)
 		
 		delay_ms(2000);
 	}
-
 }
 
 //General short delays
@@ -1077,7 +1224,8 @@ uint8_t print_disk_info(const struct fat_fs_struct* fs)
 
 void print_menu(void)
 {
-	uart_puts_p(PSTR("\nAvailable commands:\n"));
+	uart_puts_p(PSTR("\nOpenLog v1.1\n"));
+	uart_puts_p(PSTR("Available commands:\n"));
 	uart_puts_p(PSTR("new <file>\t\t: Creates <file>\n"));
 	uart_puts_p(PSTR("append <file>\t\t: Appends text to end of <file>. The text is read from the UART in a stream and is not echoed. Finish by sending Ctrl+z (ASCII 26)\n"));
 	uart_puts_p(PSTR("write <file> <offset>\t: Writes text to <file>, starting from <offset>. The text is read from the UART, line by line. Finish with an empty line\n"));
@@ -1092,21 +1240,24 @@ void print_menu(void)
 	uart_puts_p(PSTR("init\t\t\t: Reinitializes and reopens the memory card\n"));
 
 	uart_puts_p(PSTR("sync\t\t\t: Ensures all buffered data is written to the card\n"));
-	uart_puts_p(PSTR("set\t\t\t: Menu to configure baud rate\n"));
+	uart_puts_p(PSTR("\nMenus:\n"));
+	uart_puts_p(PSTR("set\t\t\t: Menu to configure system boot mode\n"));
+	uart_puts_p(PSTR("baud\t\t\t: Menu to configure baud rate\n"));
 }
 
-void config_menu(void)
+//Configure what baud rate to communicate at
+void baud_menu(void)
 {
-	char buffer[24];
+	char buffer[5];
 
 	while(1)
 	{
-		uart_puts_p(PSTR("\nOpenLog Configuration:\n"));
+		uart_puts_p(PSTR("\nBaud Configuration:\n"));
 		
-		uart_puts_p(PSTR("0) Set Baud rate 2400\n"));
-		uart_puts_p(PSTR("1) Set Baud rate 9600\n"));
-		uart_puts_p(PSTR("2) Set Baud rate 57600\n"));
-		uart_puts_p(PSTR("3) Set Baud rate 115200\n"));
+		uart_puts_p(PSTR("1) Set Baud rate 2400\n"));
+		uart_puts_p(PSTR("2) Set Baud rate 9600\n"));
+		uart_puts_p(PSTR("3) Set Baud rate 57600\n"));
+		uart_puts_p(PSTR("4) Set Baud rate 115200\n"));
 
 		//print prompt
 		uart_putc('>');
@@ -1118,63 +1269,98 @@ void config_menu(void)
 			continue;
 
 		//execute command
-		if(strcmp_P(command, PSTR("0")) == 0)
+		if(strcmp_P(command, PSTR("1")) == 0)
 		{
 			uart_puts_p(PSTR("\nGoing to 2400bps...\n"));
 
 			//Set baud rate to 2400
-			EEPROM_write(0x01, 0);
-			blink_error(ERROR_NEW_BAUD);
-			return;
-		}
-		if(strcmp_P(command, PSTR("1")) == 0)
-		{
-			uart_puts_p(PSTR("\nGoing to 9600bps...\n"));
-
-			//Set baud rate to 9600
-			EEPROM_write(0x01, 1);
+			EEPROM_write(LOCATION_BAUD_SETTING, BAUD_2400);
 			blink_error(ERROR_NEW_BAUD);
 			return;
 		}
 		if(strcmp_P(command, PSTR("2")) == 0)
 		{
-			uart_puts_p(PSTR("\nGoing to 57600bps...\n"));
+			uart_puts_p(PSTR("\nGoing to 9600bps...\n"));
 
-			//Set baud rate to 57600
-			EEPROM_write(0x01, 2);
+			//Set baud rate to 9600
+			EEPROM_write(LOCATION_BAUD_SETTING, BAUD_9600);
 			blink_error(ERROR_NEW_BAUD);
 			return;
 		}
 		if(strcmp_P(command, PSTR("3")) == 0)
 		{
+			uart_puts_p(PSTR("\nGoing to 57600bps...\n"));
+
+			//Set baud rate to 57600
+			EEPROM_write(LOCATION_BAUD_SETTING, BAUD_57600);
+			blink_error(ERROR_NEW_BAUD);
+			return;
+		}
+		if(strcmp_P(command, PSTR("4")) == 0)
+		{
 			uart_puts_p(PSTR("\nGoing to 115200bps...\n"));
 
 			//Set baud rate to 115200
-			EEPROM_write(0x01, 3);
+			EEPROM_write(LOCATION_BAUD_SETTING, BAUD_115200);
 			blink_error(ERROR_NEW_BAUD);
 			return;
 		}
 	}
 }
 
-//Basic EEPROM functions to read/write to the internal EEPROM
-void EEPROM_write(uint16_t uiAddress, unsigned char ucData)
+//Change how OpenLog works
+//1) Turn on unit, unit will create new file, and just start logging
+//2) Turn on, append to known file, and just start logging
+//3) Turn on, sit at command prompt
+void system_menu(void)
 {
-	while(EECR & (1<<EEPE)); //Wait for completion of previous write
-	EEARH = uiAddress >> 8; //Set up address and data registers
-	EEARL = uiAddress; //Set up address and data registers
-	EEDR = ucData;
-	EECR |= (1<<EEMPE); //Write logical one to EEMWE
-	EECR |= (1<<EEPE); //Start eeprom write by setting EEWE
-}
+	char buffer[5];
 
-unsigned char EEPROM_read(uint16_t uiAddress)
-{
-	while(EECR & (1<<EEPE)); //Wait for completion of previous write
-	EEARH = uiAddress >> 8; //Set up address and data registers
-	EEARL = uiAddress; //Set up address and data registers
-	EECR |= (1<<EERE); //Start eeprom read by writing EERE
-	return EEDR; //Return data from data register
+	while(1)
+	{
+		uart_puts_p(PSTR("\nSystem Configuration\n"));
+		uart_puts_p(PSTR("\nBoot to:\n"));
+		
+		uart_puts_p(PSTR("1) New file logging\n"));
+		uart_puts_p(PSTR("2) Append file logging\n"));
+		uart_puts_p(PSTR("3) Command prompt\n"));
+		uart_puts_p(PSTR("4) Reset new file number\n"));
+
+		//print prompt
+		uart_putc('>');
+
+		//read command
+		char* command = buffer;
+
+		if(read_line(command, sizeof(buffer)) < 1)
+			continue;
+
+		//execute command
+		if(strcmp_P(command, PSTR("1")) == 0)
+		{
+			uart_puts_p(PSTR("New file logging\n"));
+			EEPROM_write(LOCATION_SYSTEM_SETTING, MODE_NEWLOG);
+			return;
+		}
+		if(strcmp_P(command, PSTR("2")) == 0)
+		{
+			uart_puts_p(PSTR("Append file logging\n"));
+			EEPROM_write(LOCATION_SYSTEM_SETTING, MODE_SEQLOG);
+			return;
+		}
+		if(strcmp_P(command, PSTR("3")) == 0)
+		{
+			uart_puts_p(PSTR("Command prompt\n"));
+			EEPROM_write(LOCATION_SYSTEM_SETTING, MODE_COMMAND);
+			return;
+		}
+		if(strcmp_P(command, PSTR("4")) == 0)
+		{
+			uart_puts_p(PSTR("New file number reset to zero\n"));
+			EEPROM_write(LOCATION_FILE_NUMBER, 0);
+			return;
+		}
+	}
 }
 
 #if FAT_DATETIME_SUPPORT

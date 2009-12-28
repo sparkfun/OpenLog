@@ -39,6 +39,7 @@ extern "C"
  * like file and directory handles, set to 0 to use pre-allocated
  * fixed-size handle arrays.
  */
+//Default = 0
 #define USE_DYNAMIC_MEMORY 0
 //#define USE_DYNAMIC_MEMORY 1
 

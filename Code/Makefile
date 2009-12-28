@@ -104,6 +104,10 @@ ASRC =
 # Optimization level, can be [0, 1, 2, 3, s]. 
 #     0 = turn off optimization. s = optimize for size.
 #     (Note: 3 is not always the best optimization level. See avr-libc FAQ.)
+#OPT = 0 //EEPROM functions fail at this level
+#OPT = 1 //EEPROM functions fail at this level
+#OPT = 2 //Ctrl+z doesn't work
+#OPT = 3 //Ctrl+z doesn't work - this causes the asm("nop"); to fail
 OPT = s
 
 
@@ -272,14 +276,19 @@ LDFLAGS += $(PRINTF_LIB) $(SCANF_LIB) $(MATH_LIB)
 #---------------- Programming Options (avrdude serial bootloader) ----------------
 
 #"C:\arduino\hardware\tools\avr\bin\avrdude" -PCOM3 -c stk500v1 -patmega168 -b19200 -Uflash:w:Simon-PTH-v1.hex -V -F -C"C:\arduino\hardware\tools\avr\etc\avrdude.conf"
-SERIAL_AVRDUDE = D:\arduino\hardware\tools\avr\bin\avrdude
+#SERIAL_AVRDUDE = D:\arduino\hardware\tools\avr\bin\avrdude
 #SERIAL_AVRDUDE = avrdude
-SERIAL_AVRDUDE_CONFIG = D:\arduino\hardware\tools\avr\etc\avrdude.conf
-SERIAL_AVRDUDE_PORT = COM1
-SERIAL_AVRDUDE_SPEED = 115200
+#SERIAL_AVRDUDE_CONFIG = D:\arduino\hardware\tools\avr\etc\avrdude.conf
+#SERIAL_AVRDUDE_PORT = COM5
+#SERIAL_AVRDUDE_SPEED = 57600
+
+SERIAL_AVRDUDE = C:\arduino\hardware\tools\avr\bin\avrdude
+SERIAL_AVRDUDE_CONFIG = C:\arduino\hardware\tools\avr\etc\avrdude.conf
+SERIAL_AVRDUDE_PORT = COM3
+SERIAL_AVRDUDE_SPEED = 57600
 SERIAL_AVRDUDE_PROGRAMMER = stk500v1
 
-SERIAL_AVRDUDE_FLAGS = -p $(MCU) -P $(SERIAL_AVRDUDE_PORT) -c $(SERIAL_AVRDUDE_PROGRAMMER) -b $(SERIAL_AVRDUDE_SPEED)
+SERIAL_AVRDUDE_FLAGS = -p $(MCU) -P $(SERIAL_AVRDUDE_PORT) -c $(SERIAL_AVRDUDE_PROGRAMMER) -b $(SERIAL_AVRDUDE_SPEED) -V
 SERIAL_AVRDUDE_FLAGS += -C$(SERIAL_AVRDUDE_CONFIG)
 SERIAL_AVRDUDE_FLAGS += $(AVRDUDE_NO_VERIFY)
 SERIAL_AVRDUDE_FLAGS += $(AVRDUDE_VERBOSE)

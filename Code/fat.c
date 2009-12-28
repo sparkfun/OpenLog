@@ -16,6 +16,9 @@
 
 #include <string.h>
 
+#define DOXYGEN 0
+
+
 #if USE_DYNAMIC_MEMORY
     #include <stdlib.h>
 #endif

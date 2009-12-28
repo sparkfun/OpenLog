@@ -97,6 +97,7 @@ void uart_init(uint8_t uart_speed)
     //UCSRB = (1 << RXEN) | (1 << TXEN) | (1 << RXCIE);
     UCSRB = (1 << RXEN) | (1 << TXEN);
 #endif
+
 }
 
 void uart_putc(uint8_t c)

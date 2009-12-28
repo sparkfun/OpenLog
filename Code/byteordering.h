@@ -13,6 +13,9 @@
 
 #include <stdint.h>
 
+#define LITTLE_ENDIAN 1
+#define DOXYGEN 0
+
 #ifdef __cplusplus
 extern "C"
 {
@@ -52,6 +55,7 @@ extern "C"
  * \param[in] val A 32-bit integer in host byte order.
  * \returns The given 32-bit integer converted to little-endian byte order.
  */
+
 
 #if DOXYGEN || LITTLE_ENDIAN || __AVR__
 #define HTOL16(val) (val)

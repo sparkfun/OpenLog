@@ -12,6 +12,8 @@
 #include <avr/io.h>
 #include "sd_raw.h"
 
+#define DOXYGEN 0
+
 /**
  * \addtogroup sd_raw MMC/SD/SDHC card raw access
  *
