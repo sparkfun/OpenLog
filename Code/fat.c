@@ -459,7 +459,11 @@ cluster_t fat_get_next_cluster(const struct fat_fs_struct* fs, cluster_t cluster
     {
         /* read appropriate fat entry */
         uint16_t fat_entry;
-        if(!fs->partition->device_read(fs->header.fat_offset + cluster_num * sizeof(fat_entry), (uint8_t*) &fat_entry, sizeof(fat_entry)))
+        uint32_t cluster_offset = cluster_num;
+        cluster_offset *= sizeof(fat_entry);
+        cluster_offset += fs->header.fat_offset;
+
+        if(!fs->partition->device_read(cluster_offset, (uint8_t*) &fat_entry, sizeof(fat_entry)))
             return 0;
 
         /* determine next cluster from fat */
