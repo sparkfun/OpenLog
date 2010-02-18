@@ -637,11 +637,12 @@ void command_shell(void)
 			/* print file contents */
 			uint8_t buffer[8];
 			uint32_t offset = 0;
-			while(fat_read_file(fd, buffer, sizeof(buffer)) > 0)
+                        uint8_t len;
+			while((len = fat_read_file(fd, buffer, sizeof(buffer))) > 0)
 			{
 				uart_putdw_hex(offset);
 				uart_putc(':');
-				for(uint8_t i = 0; i < 8; ++i)
+				for(uint8_t i = 0; i < len; ++i)
 				{
 					uart_putc(' ');
 					uart_putc_hex(buffer[i]);
@@ -652,10 +653,55 @@ void command_shell(void)
 
 			fat_close_file(fd);
 		}
+		else if(strncmp_P(command, PSTR("read "), 5) == 0)
+		{
+			command += 5;
+			if(command[0] == '\0')
+				continue;
+			
+			/* search file in current directory and open it */
+			struct fat_file_struct* fd = open_file_in_dir(fs, dd, command);
+			if(!fd)
+			{
+				uart_puts_p(PSTR("error opening "));
+				uart_puts(command);
+				uart_putc('\n');
+				continue;
+			}
+
+			/* print file contents */
+			uint8_t buffer;
+			while(fat_read_file(fd, &buffer, 1) > 0)
+			{
+                            if( buffer >= ' ' && buffer < 127 )
+                                uart_putc(buffer);
+                            else if (buffer == '\n' )
+                                uart_putc(buffer);
+                            else
+                                uart_putc('.');
+			}
+                        uart_putc('\n');
+			fat_close_file(fd);
+		}
 		else if(strcmp_P(command, PSTR("disk")) == 0)
 		{
 			if(!print_disk_info(fs))
 				uart_puts_p(PSTR("error reading disk info\n"));
+		}
+		else if(strncmp_P(command, PSTR("size "), 5) == 0)
+		{
+			command += 5;
+			if(command[0] == '\0')
+				continue;
+			
+			struct fat_dir_entry_struct file_entry;
+			if(find_file_in_dir(fs, dd, command, &file_entry))
+			{
+				uart_putdw_dec(file_entry.file_size);
+				uart_putc('\n');
+			}
+                        else
+                            uart_puts("-1\n");
 		}
 #if FAT_WRITE_SUPPORT
 		else if(strncmp_P(command, PSTR("rm "), 3) == 0)
@@ -854,8 +900,46 @@ uint8_t append_file(char* file_name)
 
 	while(1)
 	{
+
 //fail		while(checked_spot == read_spot) asm("nop"); //Hang out while we wait for the interrupt to occur and advance read_spot
-		while(checked_spot == read_spot) delay_us(1); //Hang out while we wait for the interrupt to occur and advance read_spot
+
+            int cnt = 0;
+                while(checked_spot == read_spot) { 
+                    if( ++cnt > 5000 ) {
+                        cnt = 0;
+                        if(checked_spot != 0 && checked_spot != (BUFF_LEN/2)) // stuff in buff
+                        {
+                        if(checked_spot < (BUFF_LEN/2))
+                        {
+                            //Record first half the buffer
+                            if(fat_write_file(fd, (uint8_t*) input_buffer, checked_spot) != checked_spot)
+                                uart_puts_p(PSTR("error writing to file\n"));
+                        }
+                        else //checked_spot > (BUFF_LEN/2)
+                        {
+                            //Record second half the buffer
+                            if(fat_write_file(fd, (uint8_t*) input_buffer + (BUFF_LEN/2), (checked_spot - (BUFF_LEN/2)) )
+                               != (checked_spot - (BUFF_LEN/2)) )
+                                uart_puts_p(PSTR("error writing to file\n"));
+                        }
+                        unsigned spot = checked_spot > BUFF_LEN/2 ? BUFF_LEN/2 : 0;
+                        unsigned sp = spot; // start of new buffer
+                        // read_spot may have moved, copy
+			cli();
+                        while( checked_spot != read_spot ) {
+                            input_buffer[spot++] = input_buffer[checked_spot++];
+                            if( checked_spot >= BUFF_LEN )
+                                checked_spot = 0;
+                        }
+                        read_spot = spot; // set insertion to end of copy
+                        checked_spot = sp; // reset checked to beginning of copy
+			sei();
+                        }
+                        while(checked_spot == read_spot)
+                                delay_ms(1); //Hang out while we wait for the interrupt to occur and advance read_spot
+                    }
+                    delay_ms(1); //Hang out while we wait for the interrupt to occur and advance read_spot
+                }
 
 		if(input_buffer[checked_spot] == 26) //Scan for escape character
 		{
@@ -1236,6 +1320,8 @@ void print_menu(void)
 	uart_puts_p(PSTR("cd ..\t\t: Changes to lower directory in tree\n"));
 	uart_puts_p(PSTR("ls\t\t\t: Shows the content of the current directory\n"));
 	uart_puts_p(PSTR("cat <file>\t\t: Writes a hexdump of <file> to the terminal\n"));
+	uart_puts_p(PSTR("read <file>\t\t: Writes ASCII parts of <file> to the terminal\n"));
+	uart_puts_p(PSTR("size <file>\t\t: Write size of file to terminal\n"));
 	uart_puts_p(PSTR("disk\t\t\t: Shows card manufacturer, status, filesystem capacity and free storage space\n"));
 	uart_puts_p(PSTR("init\t\t\t: Reinitializes and reopens the memory card\n"));
 
