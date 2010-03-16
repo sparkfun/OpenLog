@@ -1100,7 +1100,7 @@ uint8_t read_line(char* buffer, uint8_t buffer_length)
     while(read_length < buffer_length - 1)
     {
 		PORTD ^= (1<<STAT1); //Blink the stat LED while typing
-PORTB ^= (1<<STAT2); //Blink the stat LED while typing
+		PORTB ^= (1<<STAT2); //Blink the stat LED while typing
 
         uint8_t c = uart_getc();
 
