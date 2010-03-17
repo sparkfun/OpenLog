@@ -343,9 +343,10 @@ struct command_arg
 #define ERROR_SD_INIT	3
 #define ERROR_NEW_BAUD	5
 
-#define LOCATION_BAUD_SETTING	0x01
-#define LOCATION_SYSTEM_SETTING	0x02
-#define LOCATION_FILE_NUMBER	0x03
+#define LOCATION_BAUD_SETTING		0x01
+#define LOCATION_SYSTEM_SETTING		0x02
+#define LOCATION_FILE_NUMBER_LSB	0x03
+#define LOCATION_FILE_NUMBER_MSB	0x04
 
 #define BAUD_2400	0
 #define BAUD_9600	1
@@ -365,7 +366,7 @@ static struct command_arg cmd_arg[MAX_COUNT_COMMAND_LINE_ARGS];
 
 #define BUFF_LEN 512
 char input_buffer[BUFF_LEN];
-char general_buffer[13];
+char general_buffer[25];
 uint16_t read_spot, checked_spot;
 
 //Returns the number of command line arguments
@@ -608,28 +609,40 @@ void seqlog(void)
 //Currently limited to 255 files but this should not always be the case.
 void newlog(void)
 {
-	uint8_t new_file_number;
-	new_file_number = EEPROM_read(LOCATION_FILE_NUMBER);
+	uint8_t msb, lsb;
+	uint16_t new_file_number;
 
-	if(new_file_number == 255) 
+	lsb = EEPROM_read(LOCATION_FILE_NUMBER_LSB);
+	msb = EEPROM_read(LOCATION_FILE_NUMBER_MSB);
+
+	new_file_number = msb;
+	new_file_number = new_file_number << 8;
+	new_file_number |= lsb;
+
+	if((lsb == 255) && (msb == 255))
 	{
 		new_file_number = 0; //By default, unit will start at file number zero
-		EEPROM_write(LOCATION_FILE_NUMBER, new_file_number);
+		EEPROM_write(LOCATION_FILE_NUMBER_LSB, 0x00);
+		EEPROM_write(LOCATION_FILE_NUMBER_MSB, 0x00);
 	}
+
 	char* new_file_name = general_buffer;
-	sprintf(new_file_name, "LOG%03d.txt", new_file_number);
+	sprintf(new_file_name, "LOG%05u.txt", new_file_number);
 
 	struct fat_dir_entry_struct file_entry;
 	while(!fat_create_file(dd, new_file_name, &file_entry))
 	{
 		//Increment the file number because this file name is already taken
 		new_file_number++;
-
-		sprintf(new_file_name, "LOG%03d.txt", new_file_number);
+		sprintf(new_file_name, "LOG%05u.txt", new_file_number);
 	}
 
+	//Add one the new_file_number for the next power-up
+	new_file_number++;
+
 	//Record new_file number to EEPROM
-	EEPROM_write(LOCATION_FILE_NUMBER, new_file_number++); //Add one the new_file_number for the next power-up
+	EEPROM_write(LOCATION_FILE_NUMBER_LSB, (uint8_t)(new_file_number & 0x00FF));		// LSB
+	EEPROM_write(LOCATION_FILE_NUMBER_MSB, (uint8_t)((new_file_number & 0xFF00) >> 8));	// MSB
 	
 #if DEBUG
 	uart_puts_p(PSTR("\nCreated new file: "));
@@ -1619,7 +1632,8 @@ void system_menu(void)
 		if(strcmp_P(command, PSTR("4")) == 0)
 		{
 			uart_puts_p(PSTR("New file number reset to zero\n"));
-			EEPROM_write(LOCATION_FILE_NUMBER, 0);
+			EEPROM_write(LOCATION_FILE_NUMBER_LSB, 0);
+			EEPROM_write(LOCATION_FILE_NUMBER_MSB, 0);
 			return;
 		}
 	}
