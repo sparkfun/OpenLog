@@ -91,6 +91,7 @@
 
 #include <string.h>
 #include <stdio.h>
+#include <ctype.h>
 #include <avr/pgmspace.h>
 #include <avr/interrupt.h>
 
@@ -100,6 +101,7 @@
 #include "sd_raw.h"
 #include "sd_raw_config.h"
 #include "uart.h"
+
 
 //Setting DEBUG to 1 will cause extra serial messages to appear
 //such as "Media Init Complete!" indicating the SD card was initalized
@@ -319,8 +321,16 @@ unsigned char EEPROM_read(uint16_t uiAddress);
 void delay_us(uint16_t x);
 void delay_ms(uint16_t x);
 
+struct command_arg
+{
+	char* arg; 			//Points to first character in command line argument
+	uint8_t arg_length; // Length of command line argument
+};
+
+
 #define sbi(port, port_pin)   ((port) |= (uint8_t)(1 << port_pin))
 #define cbi(port, port_pin)   ((port) &= (uint8_t)~(1 << port_pin))
+#define MIN(a,b) ((a)<(b))?(a):(b)
 
 //STAT1 is a general LED and indicates serial traffic
 #define STAT1	5
@@ -345,16 +355,119 @@ void delay_ms(uint16_t x);
 #define MODE_NEWLOG	0
 #define MODE_SEQLOG 1
 #define MODE_COMMAND 2
+#define MAX_COUNT_COMMAND_LINE_ARGS 4
 
 //Global variables
 struct fat_fs_struct* fs;
 struct partition_struct* partition;
 struct fat_dir_struct* dd;
+static struct command_arg cmd_arg[MAX_COUNT_COMMAND_LINE_ARGS];
 
 #define BUFF_LEN 512
 char input_buffer[BUFF_LEN];
+char general_buffer[13];
 uint16_t read_spot, checked_spot;
 
+//Returns the number of command line arguments
+uint8_t count_cmd_args(void)
+{
+	uint8_t count = 0;
+	uint8_t i = 0;
+	for(; i < MAX_COUNT_COMMAND_LINE_ARGS; i++)
+		if((cmd_arg[i].arg != 0) && (cmd_arg[i].arg_length > 0))
+			count++;
+
+	return count;
+}
+
+//Safe index handling of command line arguments
+char* get_cmd_arg(uint8_t index)
+{
+	memset(general_buffer, 0, sizeof(general_buffer));
+	if (index < MAX_COUNT_COMMAND_LINE_ARGS)
+		if ((cmd_arg[index].arg != 0) && (cmd_arg[index].arg_length > 0))
+			return strncpy(general_buffer, cmd_arg[index].arg, MIN(sizeof(general_buffer), cmd_arg[index].arg_length));
+
+	return 0;
+}
+
+//Safe adding of command line arguments
+void add_cmd_arg(char* buffer, uint8_t buffer_length)
+{
+	uint8_t count = count_cmd_args();
+	if (count < MAX_COUNT_COMMAND_LINE_ARGS)
+	{
+		cmd_arg[count].arg = buffer;
+		cmd_arg[count].arg_length = buffer_length;
+	}
+}
+
+//Split the command line arguments
+//Example:
+//	read <filename> <start> <length>
+//	arg[0] -> read
+//	arg[1] -> <filename>
+//	arg[2] -> <start>
+//	arg[3] -> <end>
+uint8_t split_cmd_line_args(char* buffer, uint8_t buffer_length)
+{
+	uint8_t arg_index_start = 0;
+	uint8_t arg_index_end = 1;
+
+	//Reset command line arguments
+	memset(cmd_arg, 0, sizeof(cmd_arg));
+
+	//Split the command line arguments
+	while (arg_index_end < buffer_length)
+	{
+		//Search for ASCII 32 (Space)
+		if ((buffer[arg_index_end] == ' ') || (arg_index_end + 1 == buffer_length))
+		{
+			//Fix for last character
+			if (arg_index_end + 1 == buffer_length)
+				arg_index_end = buffer_length;
+
+			//Add this command line argument to the list
+			add_cmd_arg(&(buffer[arg_index_start]), (arg_index_end - arg_index_start));
+			arg_index_start = ++arg_index_end;
+		}
+
+		arg_index_end++;
+	}
+
+	//Return the number of available command line arguments
+	return count_cmd_args();
+}
+
+//Call this function to ensure the number of parameters do not
+//exceed limit. The main purpose of this function is to avoid
+//entering file names containing spaces.
+uint8_t too_many_arguments_error(uint8_t limit, char* command)
+{
+	uint8_t count;
+	if ((count = count_cmd_args()) > limit)
+	{
+		uart_puts_p(PSTR("too many arguments("));
+		uart_putw_dec(count);
+		uart_puts_p(PSTR("): "));
+		uart_puts(command);
+		uart_putc('\n');
+		return 1;
+	}
+
+	return 0;
+}
+
+//Returns char* pointer to buffer if buffer is a valid number or
+//0(null) if not.
+char* is_number(char* buffer, uint8_t buffer_length)
+{
+	for (int i = 0; i < buffer_length; i++)
+		if (!isdigit(buffer[i]))
+			return 0;
+
+	return buffer;
+}
 
 //Circular buffer UART RX interrupt
 //Is only used during append
@@ -386,7 +499,7 @@ int main(void)
 	//If we are in sequential log mode, determine if seqlog.txt has been created or not, and then open it for logging
 	if(system_mode == MODE_SEQLOG)
 		seqlog();
-	
+
 	//Once either one of these modes exits, go to normal command mode, which is called by returning to main()
 	command_shell();
 
@@ -503,8 +616,7 @@ void newlog(void)
 		new_file_number = 0; //By default, unit will start at file number zero
 		EEPROM_write(LOCATION_FILE_NUMBER, new_file_number);
 	}
-
-	char new_file_name[13];
+	char* new_file_name = general_buffer;
 	sprintf(new_file_name, "LOG%03d.txt", new_file_number);
 
 	struct fat_dir_entry_struct file_entry;
@@ -543,8 +655,11 @@ void command_shell(void)
 		if(read_line(command, sizeof(buffer)) < 1)
 			continue;
 
+		//Argument 1: The actual command
+		char* command_arg = get_cmd_arg(0);
+
 		//execute command
-		if(strcmp_P(command, PSTR("init")) == 0)
+		if(strcmp_P(command_arg, PSTR("init")) == 0)
 		{
 			uart_puts_p(PSTR("Closing down file system\n"));
 
@@ -555,39 +670,44 @@ void command_shell(void)
 			partition_close(partition);
 			
 			//Setup SPI, init SD card, etc
-			init_media();				
+			init_media();
 
 			uart_puts_p(PSTR("File system initialized\n"));
 		}
-		else if(strcmp_P(command, PSTR("?")) == 0)
+		else if(strcmp_P(command_arg, PSTR("?")) == 0)
 		{
 			//Print available commands
 			print_menu();
 		}
-		else if(strcmp_P(command, PSTR("help")) == 0)
+		else if(strcmp_P(command_arg, PSTR("help")) == 0)
 		{
 			//Print available commands
 			print_menu();
 		}
-		else if(strcmp_P(command, PSTR("baud")) == 0)
+		else if(strcmp_P(command_arg, PSTR("baud")) == 0)
 		{
 			//Go into baud select menu
 			baud_menu();
 		}
-		else if(strcmp_P(command, PSTR("set")) == 0)
+		else if(strcmp_P(command_arg, PSTR("set")) == 0)
 		{
 			//Go into system setting menu
 			system_menu();
 		}
-		else if(strncmp_P(command, PSTR("cd "), 3) == 0)
+		else if(strncmp_P(command_arg, PSTR("cd"), 2) == 0)
 		{
-			command += 3;
-			if(command[0] == '\0')
+			//Expecting only 2 arguments
+			if (too_many_arguments_error(2, command))
+				continue;
+
+			//Argument 2: Directory name
+			command_arg = get_cmd_arg(1);
+			if(command_arg == 0)
 				continue;
 
 			/* change directory */
 			struct fat_dir_entry_struct subdir_entry;
-			if(find_file_in_dir(fs, dd, command, &subdir_entry))
+			if(find_file_in_dir(fs, dd, command_arg, &subdir_entry))
 			{
 				struct fat_dir_struct* dd_new = fat_open_dir(fs, &subdir_entry);
 				if(dd_new)
@@ -599,10 +719,10 @@ void command_shell(void)
 			}
 
 			uart_puts_p(PSTR("directory not found: "));
-			uart_puts(command);
+			uart_puts(command_arg);
 			uart_putc('\n');
 		}
-		else if(strcmp_P(command, PSTR("ls")) == 0)
+		else if(strcmp_P(command_arg, PSTR("ls")) == 0)
 		{
 			/* print directory listing */
 			struct fat_dir_entry_struct dir_entry;
@@ -618,18 +738,23 @@ void command_shell(void)
 				uart_putc('\n');
 			}
 		}
-		else if(strncmp_P(command, PSTR("cat "), 4) == 0)
+		else if(strncmp_P(command_arg, PSTR("cat"), 3) == 0)
 		{
-			command += 4;
-			if(command[0] == '\0')
+			//Expecting only 2 arguments
+			if (too_many_arguments_error(2, command))
 				continue;
-			
+
+			//Argument 2: File name
+			command_arg = get_cmd_arg(1);
+			if(command_arg == 0)
+				continue;
+
 			/* search file in current directory and open it */
-			struct fat_file_struct* fd = open_file_in_dir(fs, dd, command);
+			struct fat_file_struct* fd = open_file_in_dir(fs, dd, command_arg);
 			if(!fd)
 			{
 				uart_puts_p(PSTR("error opening "));
-				uart_puts(command);
+				uart_puts(command_arg);
 				uart_putc('\n');
 				continue;
 			}
@@ -637,7 +762,7 @@ void command_shell(void)
 			/* print file contents */
 			uint8_t buffer[8];
 			uint32_t offset = 0;
-                        uint8_t len;
+			uint8_t len;
 			while((len = fat_read_file(fd, buffer, sizeof(buffer))) > 0)
 			{
 				uart_putdw_hex(offset);
@@ -653,65 +778,102 @@ void command_shell(void)
 
 			fat_close_file(fd);
 		}
-		else if(strncmp_P(command, PSTR("read "), 5) == 0)
+		else if(strncmp_P(command_arg, PSTR("read"), 4) == 0)
 		{
-			command += 5;
-			if(command[0] == '\0')
+			//Argument 2: File name
+			command_arg = get_cmd_arg(1);
+			if(command_arg == 0)
 				continue;
-			
+
 			/* search file in current directory and open it */
-			struct fat_file_struct* fd = open_file_in_dir(fs, dd, command);
+			struct fat_file_struct* fd = open_file_in_dir(fs, dd, command_arg);
 			if(!fd)
 			{
 				uart_puts_p(PSTR("error opening "));
-				uart_puts(command);
+				uart_puts(command_arg);
 				uart_putc('\n');
 				continue;
 			}
 
+			//Argument 3: File seek position
+			if ((command_arg = get_cmd_arg(2)) != 0)
+			{
+				if ((command_arg = is_number(command_arg, strlen(command_arg))) != 0)
+				{
+					int32_t offset = strtolong(command_arg);
+					if(!fat_seek_file(fd, &offset, FAT_SEEK_SET))
+					{
+						uart_puts_p(PSTR("error seeking on "));
+						uart_puts(command);
+						uart_putc('\n');
+
+						fat_close_file(fd);
+						continue;
+					}
+				}
+			}
+
+			//Argument 4: How much data (number of characters) to read from file
+			uint32_t chunk_to_read = (uint32_t)-1;
+			if ((command_arg = get_cmd_arg(3)) != 0)
+				if ((command_arg = is_number(command_arg, strlen(command_arg))) != 0)
+					chunk_to_read = strtolong(command_arg);
+
 			/* print file contents */
 			uint8_t buffer;
-			while(fat_read_file(fd, &buffer, 1) > 0)
+			while((fat_read_file(fd, &buffer, 1) > 0) && (chunk_to_read > 0))
 			{
-                            if( buffer >= ' ' && buffer < 127 )
-                                uart_putc(buffer);
-                            else if (buffer == '\n' )
-                                uart_putc(buffer);
-                            else
-                                uart_putc('.');
+				if( buffer >= ' ' && buffer < 127 )
+					uart_putc(buffer);
+				else if (buffer == '\n' )
+					uart_putc(buffer);
+				else
+					uart_putc('.');
+
+				chunk_to_read--;
 			}
-                        uart_putc('\n');
+			uart_putc('\n');
 			fat_close_file(fd);
 		}
-		else if(strcmp_P(command, PSTR("disk")) == 0)
+		else if(strcmp_P(command_arg, PSTR("disk")) == 0)
 		{
 			if(!print_disk_info(fs))
 				uart_puts_p(PSTR("error reading disk info\n"));
 		}
-		else if(strncmp_P(command, PSTR("size "), 5) == 0)
+		else if(strncmp_P(command_arg, PSTR("size"), 4) == 0)
 		{
-			command += 5;
-			if(command[0] == '\0')
+			//Expecting only 2 arguments
+			if (too_many_arguments_error(2, command))
 				continue;
-			
+
+			//Argument 2: File name
+			command_arg = get_cmd_arg(1);
+			if(command_arg == 0)
+				continue;
+
 			struct fat_dir_entry_struct file_entry;
-			if(find_file_in_dir(fs, dd, command, &file_entry))
+			if(find_file_in_dir(fs, dd, command_arg, &file_entry))
 			{
 				uart_putdw_dec(file_entry.file_size);
 				uart_putc('\n');
 			}
-                        else
-                            uart_puts("-1\n");
+            else
+				uart_puts("-1\n");
 		}
 #if FAT_WRITE_SUPPORT
-		else if(strncmp_P(command, PSTR("rm "), 3) == 0)
+		else if(strncmp_P(command_arg, PSTR("rm"), 2) == 0)
 		{
-			command += 3;
-			if(command[0] == '\0')
+			//Expecting only 2 arguments
+			if (too_many_arguments_error(2, command))
+				continue;
+
+			//Argument 2: File name
+			command_arg = get_cmd_arg(1);
+			if(command_arg == 0)
 				continue;
 			
 			struct fat_dir_entry_struct file_entry;
-			if(find_file_in_dir(fs, dd, command, &file_entry))
+			if(find_file_in_dir(fs, dd, command_arg, &file_entry))
 			{
 				if(fat_delete_file(fs, &file_entry))
 					continue;
@@ -721,50 +883,55 @@ void command_shell(void)
 			uart_puts(command);
 			uart_putc('\n');
 		}
-		else if(strncmp_P(command, PSTR("new "), 4) == 0)
+		else if(strncmp_P(command_arg, PSTR("new"), 3) == 0)
 		{
-			command += 4;
-			if(command[0] == '\0')
+			//Expecting only 2 arguments
+			if (too_many_arguments_error(2, command))
+				continue;
+
+			//Argument 2: File name
+			command_arg = get_cmd_arg(1);
+			if(command_arg == 0)
 				continue;
 
 			struct fat_dir_entry_struct file_entry;
-			if(!fat_create_file(dd, command, &file_entry))
+			if(!fat_create_file(dd, command_arg, &file_entry))
 			{
 				uart_puts_p(PSTR("error creating file: "));
 				uart_puts(command);
 				uart_putc('\n');
 			}
 		}
-		else if(strncmp_P(command, PSTR("write "), 6) == 0)
+		else if(strncmp_P(command_arg, PSTR("write"), 5) == 0)
 		{
-			command += 6;
-			if(command[0] == '\0')
+			//Argument 2: File name
+			command_arg = get_cmd_arg(1);
+			if(command_arg == 0)
 				continue;
 
-			char* offset_value = command;
-			while(*offset_value != ' ' && *offset_value != '\0')
-				++offset_value;
+			//Argument 3: Offset value - do not continue if the value is not correct
+			char* offset_buffer;
+			if ((offset_buffer = get_cmd_arg(2)) != 0)
+				if ((offset_buffer = is_number(offset_buffer, strlen(offset_buffer))) == 0)
+					continue;
 
-			if(*offset_value == ' ')
-				*offset_value++ = '\0';
-			else
-				continue;
 
 			/* search file in current directory and open it */
-			struct fat_file_struct* fd = open_file_in_dir(fs, dd, command);
+			struct fat_file_struct* fd = open_file_in_dir(fs, dd, command_arg);
 			if(!fd)
 			{
 				uart_puts_p(PSTR("error opening "));
-				uart_puts(command);
+				uart_puts(command_arg);
 				uart_putc('\n');
 				continue;
 			}
 
-			int32_t offset = strtolong(offset_value);
+			//Seek file position
+			int32_t offset = strtolong(offset_buffer);
 			if(!fat_seek_file(fd, &offset, FAT_SEEK_SET))
 			{
 				uart_puts_p(PSTR("error seeking on "));
-				uart_puts(command);
+				uart_puts(command_arg);
 				uart_putc('\n');
 
 				fat_close_file(fd);
@@ -795,33 +962,39 @@ void command_shell(void)
 			fat_close_file(fd);
 		}
 
-		else if(strncmp_P(command, PSTR("append "), 7) == 0)
+		else if(strncmp_P(command_arg, PSTR("append"), 6) == 0)
 		{
+			//Expecting only 2 arguments
+			if (too_many_arguments_error(2, command))
+				continue;
+
+			//Argument 2: File name
 			//Find the end of a current file and begins writing to it
 			//Ends only when the user inputs Ctrl+z (ASCII 26)
-			command += 7;
-			if(command[0] == '\0')
+			command_arg = get_cmd_arg(1);
+			if(command_arg == 0)
 				continue;
 				
-			append_file(command); //Uses circular buffer to capture full stream of text and append to file
+			append_file(command_arg); //Uses circular buffer to capture full stream of text and append to file
 		}
-		else if(strncmp_P(command, PSTR("md "), 3) == 0)
+		else if(strncmp_P(command_arg, PSTR("md"), 2) == 0)
 		{
-			command += 3;
-			if(command[0] == '\0')
+			//Argument 2: Directory name
+			command_arg = get_cmd_arg(1);
+			if(command_arg == 0)
 				continue;
 
 			struct fat_dir_entry_struct dir_entry;
-			if(!fat_create_dir(dd, command, &dir_entry))
+			if(!fat_create_dir(dd, command_arg, &dir_entry))
 			{
 				uart_puts_p(PSTR("error creating directory: "));
-				uart_puts(command);
+				uart_puts(command_arg);
 				uart_putc('\n');
 			}
 		}
 #endif
 #if SD_RAW_WRITE_BUFFERING
-		else if(strcmp_P(command, PSTR("sync")) == 0)
+		else if(strcmp_P(command_arg, PSTR("sync")) == 0)
 		{
 			if(!sd_raw_sync())
 				uart_puts_p(PSTR("error syncing disk\n"));
@@ -830,7 +1003,7 @@ void command_shell(void)
 		else
 		{
 			uart_puts_p(PSTR("unknown command: "));
-			uart_puts(command);
+			uart_puts(command_arg);
 			uart_putc('\n');
 		}
     }
@@ -1132,6 +1305,9 @@ uint8_t read_line(char* buffer, uint8_t buffer_length)
             ++read_length;
         }
     }
+
+	//Split the command line into arguments
+	split_cmd_line_args(buffer, buffer_length);
 
     return read_length;
 }
