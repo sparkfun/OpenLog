@@ -74,6 +74,12 @@
 	Adding better defines for EEPROM settings
 	Adding new log and sequential log functions.
 	
+	v1.2
+	Adding support for splitting command line parameters into arguments
+	Adding support for reading files sequencially
+		read <filename> <start> <length>
+	New log now for sequencial log functions supports 0-65535 files
+
 	Code is acting very weird with what looks to be stack crashes. I can get around this by turning the optimizer off ('0').
 	Found an error : EEPROM functions fail when optimizer is set to '0' or '1'. 
 	sd-reader_config.h contains flag for USE_DYNAMIC_MEMORY
@@ -606,7 +612,7 @@ void seqlog(void)
 //Log to a new file everytime the system boots
 //Checks the spots in EEPROM for the next available LOG# file name
 //Updates EEPROM and then appends to the new log file.
-//Currently limited to 255 files but this should not always be the case.
+//Limited to 65535 files but this should not always be the case.
 void newlog(void)
 {
 	uint8_t msb, lsb;
@@ -640,9 +646,17 @@ void newlog(void)
 	//Add one the new_file_number for the next power-up
 	new_file_number++;
 
-	//Record new_file number to EEPROM
-	EEPROM_write(LOCATION_FILE_NUMBER_LSB, (uint8_t)(new_file_number & 0x00FF));		// LSB
-	EEPROM_write(LOCATION_FILE_NUMBER_MSB, (uint8_t)((new_file_number & 0xFF00) >> 8));	// MSB
+	//Record new_file number to EEPROM but do not waste too many
+	//write cycles to the EEPROM as it will wear out. Only write if
+	//needed
+	lsb = (uint8_t)(new_file_number & 0x00FF);
+	msb = (uint8_t)((new_file_number & 0xFF00) >> 8);
+
+	if (EEPROM_read(LOCATION_FILE_NUMBER_LSB) != lsb)
+		EEPROM_write(LOCATION_FILE_NUMBER_LSB, lsb); // LSB
+
+	if (EEPROM_read(LOCATION_FILE_NUMBER_MSB) != msb)
+		EEPROM_write(LOCATION_FILE_NUMBER_MSB, msb); // MSB
 	
 #if DEBUG
 	uart_puts_p(PSTR("\nCreated new file: "));
