@@ -74,11 +74,14 @@
 	Adding better defines for EEPROM settings
 	Adding new log and sequential log functions.
 	
-	v1.2
+	v1.2 (non-official version)
 	Adding support for splitting command line parameters into arguments
 	Adding support for reading files sequencially
 		read <filename> <start> <length>
 	New log now for sequencial log functions supports 0-65535 files
+	Adding support for wildcard listing or deletion of files
+		ls <wildcard search>
+		rm <wildcard delete>
 
 	Code is acting very weird with what looks to be stack crashes. I can get around this by turning the optimizer off ('0').
 	Found an error : EEPROM functions fail when optimizer is set to '0' or '1'. 
@@ -304,7 +307,7 @@
 //Function declarations
 static uint8_t read_line(char* buffer, uint8_t buffer_length);
 static uint32_t strtolong(const char* str);
-static uint8_t find_file_in_dir(struct fat_fs_struct* fs, struct fat_dir_struct* dd, const char* name, struct fat_dir_entry_struct* dir_entry);
+static uint8_t find_file_in_dir(struct fat_fs_struct* fs, struct fat_dir_struct* dd, const char* name, struct fat_dir_entry_struct* dir_entry, uint8_t use_wild_card);
 static struct fat_file_struct* open_file_in_dir(struct fat_fs_struct* fs, struct fat_dir_struct* dd, const char* name); 
 static uint8_t print_disk_info(const struct fat_fs_struct* fs);
 
@@ -474,6 +477,51 @@ char* is_number(char* buffer, uint8_t buffer_length)
 			return 0;
 
 	return buffer;
+}
+
+//Wildcard string compare.
+//Written by Jack Handy - jakkhandy@hotmail.com
+//http://www.codeproject.com/KB/string/wildcmp.aspx
+uint8_t wildcmp(const char* wild, const char* string)
+{
+
+	const char *cp = 0;
+	const char *mp = 0;
+
+	while (*string && (*wild != '*'))
+	{
+		if ((*wild != *string) && (*wild != '?'))
+		return 0;
+
+		wild++;
+		string++;
+	}
+
+	while (*string)
+	{
+		if (*wild == '*')
+		{
+			if (!(*(++wild)))
+				return 1;
+
+			mp = wild;
+			cp = string+1;
+		}
+		else if ((*wild == *string) || (*wild== '?'))
+		{
+			wild++;
+			string++;
+		}
+		else
+		{
+			wild = mp;
+			string = cp++;
+		}
+	}
+
+	while (*wild == '*')
+		wild++;
+  return !(*wild);
 }
 
 //Circular buffer UART RX interrupt
@@ -652,8 +700,7 @@ void newlog(void)
 	lsb = (uint8_t)(new_file_number & 0x00FF);
 	msb = (uint8_t)((new_file_number & 0xFF00) >> 8);
 
-	if (EEPROM_read(LOCATION_FILE_NUMBER_LSB) != lsb)
-		EEPROM_write(LOCATION_FILE_NUMBER_LSB, lsb); // LSB
+	EEPROM_write(LOCATION_FILE_NUMBER_LSB, lsb); // LSB
 
 	if (EEPROM_read(LOCATION_FILE_NUMBER_MSB) != msb)
 		EEPROM_write(LOCATION_FILE_NUMBER_MSB, msb); // MSB
@@ -672,6 +719,8 @@ void command_shell(void)
 {
 	//provide a simple shell
 	char buffer[24];
+	uint8_t tmp_var;
+
 	while(1)
 	{
 		//print prompt
@@ -732,9 +781,9 @@ void command_shell(void)
 			if(command_arg == 0)
 				continue;
 
-			/* change directory */
+			//change directory, do not use wildcards
 			struct fat_dir_entry_struct subdir_entry;
-			if(find_file_in_dir(fs, dd, command_arg, &subdir_entry))
+			if(find_file_in_dir(fs, dd, command_arg, &subdir_entry, 0))
 			{
 				struct fat_dir_struct* dd_new = fat_open_dir(fs, &subdir_entry);
 				if(dd_new)
@@ -751,18 +800,32 @@ void command_shell(void)
 		}
 		else if(strcmp_P(command_arg, PSTR("ls")) == 0)
 		{
+			//Argument 2: wild card search
+			command_arg = get_cmd_arg(1);
+
 			/* print directory listing */
 			struct fat_dir_entry_struct dir_entry;
 			while(fat_read_dir(dd, &dir_entry))
 			{
-				uint8_t spaces = sizeof(dir_entry.long_name) - strlen(dir_entry.long_name) + 4;
+				//Check if we are to do a wild card search
+				tmp_var = (command_arg == 0);
+				if(command_arg != 0)
+					if (wildcmp(command_arg, dir_entry.long_name))
+						tmp_var = 1;
 
-				uart_puts(dir_entry.long_name);
-				uart_putc(dir_entry.attributes & FAT_ATTRIB_DIR ? '/' : ' ');
-				while(spaces--)
-					uart_putc(' ');
-				uart_putdw_dec(dir_entry.file_size);
-				uart_putc('\n');
+				//If no arguments list all files, otherwise we only list the files
+				//being matched by the wildcard search
+				if (tmp_var)
+				{
+					uint8_t spaces = sizeof(dir_entry.long_name) - strlen(dir_entry.long_name) + 4;
+
+					uart_puts(dir_entry.long_name);
+					uart_putc(dir_entry.attributes & FAT_ATTRIB_DIR ? '/' : ' ');
+					while(spaces--)
+						uart_putc(' ');
+					uart_putdw_dec(dir_entry.file_size);
+					uart_putc('\n');
+				}
 			}
 		}
 		else if(strncmp_P(command_arg, PSTR("cat"), 3) == 0)
@@ -873,13 +936,13 @@ void command_shell(void)
 			if (too_many_arguments_error(2, command))
 				continue;
 
-			//Argument 2: File name
+			//Argument 2: File name - no wildcard search
 			command_arg = get_cmd_arg(1);
 			if(command_arg == 0)
 				continue;
 
 			struct fat_dir_entry_struct file_entry;
-			if(find_file_in_dir(fs, dd, command_arg, &file_entry))
+			if(find_file_in_dir(fs, dd, command_arg, &file_entry, 0))
 			{
 				uart_putdw_dec(file_entry.file_size);
 				uart_putc('\n');
@@ -890,25 +953,27 @@ void command_shell(void)
 #if FAT_WRITE_SUPPORT
 		else if(strncmp_P(command_arg, PSTR("rm"), 2) == 0)
 		{
-			//Expecting only 2 arguments
-			if (too_many_arguments_error(2, command))
+			//Expecting max 3 arguments
+			if (too_many_arguments_error(3, command))
 				continue;
 
-			//Argument 2: File name
+			//Argument 2: File name or wildcard removal
 			command_arg = get_cmd_arg(1);
 			if(command_arg == 0)
 				continue;
-			
+
 			struct fat_dir_entry_struct file_entry;
-			if(find_file_in_dir(fs, dd, command_arg, &file_entry))
+			while(find_file_in_dir(fs, dd, command_arg, &file_entry, 1))
 			{
-				if(fat_delete_file(fs, &file_entry))
-					continue;
+				if(!fat_delete_file(fs, &file_entry))
+				{
+					//Some kind of error, but continue anyway
+					uart_puts_p(PSTR("error deleting file: "));
+					uart_puts(command);
+					uart_putc('\n');
+				}
 			}
 
-			uart_puts_p(PSTR("error deleting file: "));
-			uart_puts(command);
-			uart_putc('\n');
 		}
 		else if(strncmp_P(command_arg, PSTR("new"), 3) == 0)
 		{
@@ -1459,11 +1524,11 @@ uint32_t strtolong(const char* str)
     return l;
 }
 
-uint8_t find_file_in_dir(struct fat_fs_struct* fs, struct fat_dir_struct* dd, const char* name, struct fat_dir_entry_struct* dir_entry)
+uint8_t find_file_in_dir(struct fat_fs_struct* fs, struct fat_dir_struct* dd, const char* name, struct fat_dir_entry_struct* dir_entry, uint8_t use_wild_card)
 {
     while(fat_read_dir(dd, dir_entry))
     {
-        if(strcmp(dir_entry->long_name, name) == 0)
+        if((strcmp(dir_entry->long_name, name) == 0) || ((use_wild_card == 1) && (wildcmp(name, dir_entry->long_name) == 1)))
         {
             fat_reset_dir(dd);
             return 1;
@@ -1475,11 +1540,12 @@ uint8_t find_file_in_dir(struct fat_fs_struct* fs, struct fat_dir_struct* dd, co
 
 struct fat_file_struct* open_file_in_dir(struct fat_fs_struct* fs, struct fat_dir_struct* dd, const char* name)
 {
-    struct fat_dir_entry_struct file_entry;
-    if(!find_file_in_dir(fs, dd, name, &file_entry))
-        return 0;
+	struct fat_dir_entry_struct file_entry;
+	//Do not use wildcards here
+	if(!find_file_in_dir(fs, dd, name, &file_entry, 0))
+		return 0;
 
-    return fat_open_file(fs, &file_entry);
+	return fat_open_file(fs, &file_entry);
 }
 
 uint8_t print_disk_info(const struct fat_fs_struct* fs)
@@ -1511,19 +1577,19 @@ uint8_t print_disk_info(const struct fat_fs_struct* fs)
 
 void print_menu(void)
 {
-	uart_puts_p(PSTR("\nOpenLog v1.1\n"));
+	uart_puts_p(PSTR("\nOpenLog v1.2 (non-official)\n"));
 	uart_puts_p(PSTR("Available commands:\n"));
 	uart_puts_p(PSTR("new <file>\t\t: Creates <file>\n"));
 	uart_puts_p(PSTR("append <file>\t\t: Appends text to end of <file>. The text is read from the UART in a stream and is not echoed. Finish by sending Ctrl+z (ASCII 26)\n"));
 	uart_puts_p(PSTR("write <file> <offset>\t: Writes text to <file>, starting from <offset>. The text is read from the UART, line by line. Finish with an empty line\n"));
-	uart_puts_p(PSTR("rm <file>\t\t: Deletes <file>\n"));
+	uart_puts_p(PSTR("rm <file>\t\t: Deletes <file>. Use wildcard to do a wildcard removal of files\n"));
 	uart_puts_p(PSTR("md <directory>\t: Creates a directory called <directory>\n"));
 
 	uart_puts_p(PSTR("cd <directory>\t\t: Changes current working directory to <directory>\n"));
 	uart_puts_p(PSTR("cd ..\t\t: Changes to lower directory in tree\n"));
-	uart_puts_p(PSTR("ls\t\t\t: Shows the content of the current directory\n"));
+	uart_puts_p(PSTR("ls\t\t\t: Shows the content of the current directory. Use wildcard to do a wildcard listing of files in current directory\n"));
 	uart_puts_p(PSTR("cat <file>\t\t: Writes a hexdump of <file> to the terminal\n"));
-	uart_puts_p(PSTR("read <file>\t\t: Writes ASCII parts of <file> to the terminal\n"));
+	uart_puts_p(PSTR("read <file> <start> <length>\t\t: Writes ASCII <length> parts of <file> to the terminal starting at <start>. Ommit <start> and <length> to read whole file\n"));
 	uart_puts_p(PSTR("size <file>\t\t: Write size of file to terminal\n"));
 	uart_puts_p(PSTR("disk\t\t\t: Shows card manufacturer, status, filesystem capacity and free storage space\n"));
 	uart_puts_p(PSTR("init\t\t\t: Reinitializes and reopens the memory card\n"));
