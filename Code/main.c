@@ -744,7 +744,7 @@ void command_shell(void)
 
 			/* close partition */
 			partition_close(partition);
-			
+
 			//Setup SPI, init SD card, etc
 			init_media();
 
@@ -1285,18 +1285,21 @@ void init_media(void)
 		//continue;
 	}
 
+	//Make sure all file handles are cleared
+	fat_clear_handles();
+
 	/* open first partition */
 	partition = partition_open(sd_raw_read,
-														sd_raw_read_interval,
+								sd_raw_read_interval,
 #if SD_RAW_WRITE_SUPPORT
-														sd_raw_write,
-														sd_raw_write_interval,
+								sd_raw_write,
+								sd_raw_write_interval,
 #else
-														0,
-														0,
+								0,
+								0,
 #endif
-														0
-													   );
+								0
+								);
 
 	if(!partition)
 	{
@@ -1304,16 +1307,16 @@ void init_media(void)
 		 * is a "superfloppy", i.e. has no MBR.
 		 */
 		partition = partition_open(sd_raw_read,
-								   sd_raw_read_interval,
+									sd_raw_read_interval,
 #if SD_RAW_WRITE_SUPPORT
-								   sd_raw_write,
-								   sd_raw_write_interval,
+									sd_raw_write,
+									sd_raw_write_interval,
 #else
-								   0,
-								   0,
+									0,
+									0,
 #endif
-								   -1
-								  );
+									-1
+									);
 		if(!partition)
 		{
 #if DEBUG

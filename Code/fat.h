@@ -89,6 +89,7 @@ struct fat_dir_entry_struct
     offset_t entry_offset;
 };
 
+void fat_clear_handles(void);
 struct fat_fs_struct* fat_open(struct partition_struct* partition);
 void fat_close(struct fat_fs_struct* fs);
 

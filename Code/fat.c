@@ -2332,3 +2332,15 @@ uint8_t fat_get_fs_free_32_callback(uint8_t* buffer, offset_t offset, void* p)
 }
 #endif
 
+/**
+ * \ingroup fat_fs
+ * Initialize the data structures used to store file system handles
+ */
+void fat_clear_handles(void)
+{
+#if !USE_DYNAMIC_MEMORY
+	memset(fat_fs_handles, 0, sizeof(fat_fs_handles));
+	memset(fat_file_handles, 0, sizeof(fat_file_handles));
+	memset(fat_dir_handles, 0, sizeof(fat_dir_handles));
+#endif
+}
