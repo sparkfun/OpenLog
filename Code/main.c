@@ -74,15 +74,6 @@
 	Adding better defines for EEPROM settings
 	Adding new log and sequential log functions.
 	
-	v1.2 (non-official version)
-	Adding support for splitting command line parameters into arguments
-	Adding support for reading files sequencially
-		read <filename> <start> <length>
-	New log now for sequencial log functions supports 0-65535 files
-	Adding support for wildcard listing or deletion of files
-		ls <wildcard search>
-		rm <wildcard delete>
-
 	Code is acting very weird with what looks to be stack crashes. I can get around this by turning the optimizer off ('0').
 	Found an error : EEPROM functions fail when optimizer is set to '0' or '1'. 
 	sd-reader_config.h contains flag for USE_DYNAMIC_MEMORY
@@ -96,6 +87,23 @@
 	
 	Added file called 'lots-o-text.txt' to version control. This text contains easy to scan text to be used for full data
 	rate checking and testing.	
+
+	v1.2
+	ringp added:
+	Adding support for splitting command line parameters into arguments
+	Adding support for reading files sequencially
+		read <filename> <start> <length>
+	New log now for sequencial log functions supports 0-65535 files
+	Adding support for wildcard listing or deletion of files
+		ls <wildcard search>
+		rm <wildcard delete>
+
+	Really great additions. Thanks ringp!
+	
+	Nate added error testing within newlog()
+	Checks to see if we have 65534 logs. If so, error out to command prompt with "!Too many logs:1"
+	
+
 */
 
 #include <string.h>
@@ -1608,7 +1616,7 @@ uint8_t print_disk_info(const struct fat_fs_struct* fs)
 
 void print_menu(void)
 {
-	uart_puts_p(PSTR("\nOpenLog v1.2 (non-official)\n"));
+	uart_puts_p(PSTR("\nOpenLog v1.2\n"));
 	uart_puts_p(PSTR("Available commands:\n"));
 	uart_puts_p(PSTR("new <file>\t\t: Creates <file>\n"));
 	uart_puts_p(PSTR("append <file>\t\t: Appends text to end of <file>. The text is read from the UART in a stream and is not echoed. Finish by sending Ctrl+z (ASCII 26)\n"));
@@ -1698,6 +1706,7 @@ void baud_menu(void)
 //1) Turn on unit, unit will create new file, and just start logging
 //2) Turn on, append to known file, and just start logging
 //3) Turn on, sit at command prompt
+//4) Resets the newlog file number to zero
 void system_menu(void)
 {
 	char buffer[5];
@@ -1743,12 +1752,12 @@ void system_menu(void)
 		if(strcmp_P(command, PSTR("4")) == 0)
 		{
 			uart_puts_p(PSTR("New file number reset to zero\n"));
-			//EEPROM_write(LOCATION_FILE_NUMBER_LSB, 0);
-			//EEPROM_write(LOCATION_FILE_NUMBER_MSB, 0);
+			EEPROM_write(LOCATION_FILE_NUMBER_LSB, 0);
+			EEPROM_write(LOCATION_FILE_NUMBER_MSB, 0);
 
 			//65533 log testing
-			EEPROM_write(LOCATION_FILE_NUMBER_LSB, 0xFD);
-			EEPROM_write(LOCATION_FILE_NUMBER_MSB, 0xFF);
+			//EEPROM_write(LOCATION_FILE_NUMBER_LSB, 0xFD);
+			//EEPROM_write(LOCATION_FILE_NUMBER_MSB, 0xFF);
 
 			return;
 		}
