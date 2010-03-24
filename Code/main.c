@@ -88,6 +88,7 @@
 	Added file called 'lots-o-text.txt' to version control. This text contains easy to scan text to be used for full data
 	rate checking and testing.	
 
+	
 	v1.2
 	ringp added:
 	Adding support for splitting command line parameters into arguments
@@ -103,6 +104,28 @@
 	Nate added error testing within newlog()
 	Checks to see if we have 65534 logs. If so, error out to command prompt with "!Too many logs:1"
 	
+	
+	v1.3
+	Added sd_raw_sync() inside append_file. I believe this was why tz1's addition of the timeout buffer update feature
+	was not working. Auto buffer update now working. So if you don't send anything to OpenLog for 5 seconds,
+	the buffer will automatically record/update.
+	
+	Need to create 'Testing' page to outline the battery of tests we need to throw at any OpenLog after a firmware 
+	submission and update is complete.
+	
+	Testing
+	create 40,000 logs
+
+	Record at full speed:
+	Run at full 115200, load lotsoftext.txt and verify no characters are dropped.
+
+	Detect too many logs:
+	Create new log at 65533 (do this by editing 'zero' function to set EEPROM to 0xFF and oxFD) 
+	and power cycle. Verify unit starts new log. Power cycle and verify unit errors out and drops to command prompt.
+
+	Record buffer after timeout:
+	Create new log. Type 20 characters and wait 5 seconds. Unit should auto-record buffer. Power down unit. 
+	Power up unit and verify LOG has 20 characters recorded.	
 
 */
 
@@ -751,6 +774,69 @@ void newlog(void)
 	append_file(new_file_name);
 }
 
+#if DEBUG
+//This function creates 40,000 directories when called. It is used to test
+//how many files a root directory on OpenLog can be created.
+//Only enabled during debugging
+
+//Update: for some reason, creating sequential files like this takes longer, and longer, and longer.
+//But a power up goes much faster (to discover and create a new file).
+//Not sure why it takes so long, but creating 250 files takes many many many minutes.
+void create_lots_of_files(void)
+{
+	uart_puts_p(PSTR("\nCreating tons of files!"));
+
+	uint16_t files_to_create;
+	uint16_t new_file_number;
+	
+	for(files_to_create = 0 ; files_to_create < 100 ; files_to_create++)
+	{
+		new_file_number = files_to_create;
+		
+		//Generic file creation routine:
+		//=====================
+
+		char* new_file_name = general_buffer;
+		sprintf(new_file_name, "LOG%05u.txt", new_file_number);
+
+		uart_puts_p(PSTR("1"));
+
+		struct fat_dir_entry_struct file_entry;
+		while(!fat_create_file(dd, new_file_name, &file_entry))
+		{
+			uart_puts_p(PSTR("2"));
+
+			//Increment the file number because this file name is already taken
+			new_file_number++;
+			sprintf(new_file_name, "LOG%05u.txt", new_file_number);
+			
+			//Shoot! There's still a chance that we can have too many logs here
+			//For example, if all the way up to LOG65533 was already on card, 
+			//then reset the EEPROM log number, 65533 would be skipped, 65534 would be created
+			//and the above 65534 test would be skipped
+			
+			if(new_file_number > 65533)
+			{
+				//Gracefully drop out to command prompt with some error
+				uart_puts_p(PSTR("!Too many logs:2!"));
+				return; //Bail!
+			}
+		}
+
+		//=====================
+
+		//File created!
+		uart_puts_p(PSTR("\nF:"));
+		uart_puts(new_file_name);
+		uart_puts_p(PSTR("\n"));
+
+
+	}
+
+}
+#endif
+
+
 void command_shell(void)
 {
 	//provide a simple shell
@@ -806,6 +892,13 @@ void command_shell(void)
 			//Go into system setting menu
 			system_menu();
 		}
+		#if DEBUG
+		else if(strcmp_P(command_arg, PSTR("create")) == 0)
+		{
+			//Go into system setting menu
+			create_lots_of_files();
+		}
+		#endif
 		else if(strncmp_P(command_arg, PSTR("cd"), 2) == 0)
 		{
 			//Expecting only 2 arguments
@@ -1204,43 +1297,53 @@ uint8_t append_file(char* file_name)
 
 //fail		while(checked_spot == read_spot) asm("nop"); //Hang out while we wait for the interrupt to occur and advance read_spot
 
-            int cnt = 0;
-                while(checked_spot == read_spot) { 
-                    if( ++cnt > 5000 ) {
-                        cnt = 0;
-                        if(checked_spot != 0 && checked_spot != (BUFF_LEN/2)) // stuff in buff
-                        {
-                        if(checked_spot < (BUFF_LEN/2))
-                        {
-                            //Record first half the buffer
-                            if(fat_write_file(fd, (uint8_t*) input_buffer, checked_spot) != checked_spot)
-                                uart_puts_p(PSTR("error writing to file\n"));
-                        }
-                        else //checked_spot > (BUFF_LEN/2)
-                        {
-                            //Record second half the buffer
-                            if(fat_write_file(fd, (uint8_t*) input_buffer + (BUFF_LEN/2), (checked_spot - (BUFF_LEN/2)) )
-                               != (checked_spot - (BUFF_LEN/2)) )
-                                uart_puts_p(PSTR("error writing to file\n"));
-                        }
-                        unsigned spot = checked_spot > BUFF_LEN/2 ? BUFF_LEN/2 : 0;
-                        unsigned sp = spot; // start of new buffer
-                        // read_spot may have moved, copy
-			cli();
-                        while( checked_spot != read_spot ) {
-                            input_buffer[spot++] = input_buffer[checked_spot++];
-                            if( checked_spot >= BUFF_LEN )
-                                checked_spot = 0;
-                        }
-                        read_spot = spot; // set insertion to end of copy
-                        checked_spot = sp; // reset checked to beginning of copy
-			sei();
-                        }
-                        while(checked_spot == read_spot)
-                                delay_ms(1); //Hang out while we wait for the interrupt to occur and advance read_spot
-                    }
-                    delay_ms(1); //Hang out while we wait for the interrupt to occur and advance read_spot
-                }
+		uint16_t timeout_counter = 0;
+
+		while(checked_spot == read_spot) 
+		{ 
+			if( ++timeout_counter > 5000 ) 
+			{
+				timeout_counter = 0;
+
+				if(checked_spot != 0 && checked_spot != (BUFF_LEN/2)) // stuff in buff
+				{
+					if(checked_spot < (BUFF_LEN/2))
+					{
+						//Record first half the buffer
+						if(fat_write_file(fd, (uint8_t*) input_buffer, checked_spot) != checked_spot)
+							uart_puts_p(PSTR("error writing to file\n"));
+					}
+					else //checked_spot > (BUFF_LEN/2)
+					{
+						//Record second half the buffer
+						if(fat_write_file(fd, (uint8_t*) input_buffer + (BUFF_LEN/2), (checked_spot - (BUFF_LEN/2)) ) != (checked_spot - (BUFF_LEN/2)) )
+							uart_puts_p(PSTR("error writing to file\n"));
+					}
+					unsigned spot = checked_spot > BUFF_LEN/2 ? BUFF_LEN/2 : 0;
+					unsigned sp = spot; // start of new buffer
+					
+					// read_spot may have moved, copy
+	cli();
+					while( checked_spot != read_spot ) 
+					{
+						input_buffer[spot++] = input_buffer[checked_spot++];
+						if( checked_spot >= BUFF_LEN )
+							checked_spot = 0;
+					}
+					
+					read_spot = spot; // set insertion to end of copy
+					checked_spot = sp; // reset checked to beginning of copy
+	sei();
+				}
+				
+				sd_raw_sync(); //Sync all newly written data to card
+
+				while(checked_spot == read_spot)
+						delay_ms(1); //Hang out while we wait for the interrupt to occur and advance read_spot
+			}
+
+			delay_ms(1); //Hang out while we wait for the interrupt to occur and advance read_spot
+		}
 
 		if(input_buffer[checked_spot] == 26) //Scan for escape character
 		{
@@ -1616,7 +1719,7 @@ uint8_t print_disk_info(const struct fat_fs_struct* fs)
 
 void print_menu(void)
 {
-	uart_puts_p(PSTR("\nOpenLog v1.2\n"));
+	uart_puts_p(PSTR("\nOpenLog v1.3\n"));
 	uart_puts_p(PSTR("Available commands:\n"));
 	uart_puts_p(PSTR("new <file>\t\t: Creates <file>\n"));
 	uart_puts_p(PSTR("append <file>\t\t: Appends text to end of <file>. The text is read from the UART in a stream and is not echoed. Finish by sending Ctrl+z (ASCII 26)\n"));
