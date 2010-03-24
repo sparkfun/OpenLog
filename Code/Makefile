@@ -277,14 +277,15 @@ LDFLAGS += $(PRINTF_LIB) $(SCANF_LIB) $(MATH_LIB)
 
 #"C:\arduino\hardware\tools\avr\bin\avrdude" -PCOM3 -c stk500v1 -patmega168 -b19200 -Uflash:w:Simon-PTH-v1.hex -V -F -C"C:\arduino\hardware\tools\avr\etc\avrdude.conf"
 #SERIAL_AVRDUDE = D:\arduino\hardware\tools\avr\bin\avrdude
-#SERIAL_AVRDUDE = avrdude
-#SERIAL_AVRDUDE_CONFIG = D:\arduino\hardware\tools\avr\etc\avrdude.conf
-#SERIAL_AVRDUDE_PORT = COM5
-#SERIAL_AVRDUDE_SPEED = 57600
 
-SERIAL_AVRDUDE = C:\arduino\hardware\tools\avr\bin\avrdude
-SERIAL_AVRDUDE_CONFIG = C:\arduino\hardware\tools\avr\etc\avrdude.conf
-SERIAL_AVRDUDE_PORT = COM3
+SERIAL_AVRDUDE = avrdude
+SERIAL_AVRDUDE_CONFIG = D:\arduino\hardware\tools\avr\etc\avrdude.conf
+SERIAL_AVRDUDE_PORT = COM5
+
+#SERIAL_AVRDUDE = C:\arduino\hardware\tools\avr\bin\avrdude
+#SERIAL_AVRDUDE_CONFIG = C:\arduino\hardware\tools\avr\etc\avrdude.conf
+#SERIAL_AVRDUDE_PORT = COM3
+
 SERIAL_AVRDUDE_SPEED = 57600
 SERIAL_AVRDUDE_PROGRAMMER = stk500v1
 

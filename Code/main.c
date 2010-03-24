@@ -666,19 +666,35 @@ void newlog(void)
 	uint8_t msb, lsb;
 	uint16_t new_file_number;
 
+	//Combine two 8-bit EEPROM spots into one 16-bit number
 	lsb = EEPROM_read(LOCATION_FILE_NUMBER_LSB);
 	msb = EEPROM_read(LOCATION_FILE_NUMBER_MSB);
 
 	new_file_number = msb;
 	new_file_number = new_file_number << 8;
 	new_file_number |= lsb;
-
+	
+	//If both EEPROM spots are 255 (0xFF), that means they are un-initialized (first time OpenLog has been turned on)
+	//Let's init them both to 0
 	if((lsb == 255) && (msb == 255))
 	{
 		new_file_number = 0; //By default, unit will start at file number zero
 		EEPROM_write(LOCATION_FILE_NUMBER_LSB, 0x00);
 		EEPROM_write(LOCATION_FILE_NUMBER_MSB, 0x00);
 	}
+
+	//The above code looks like it will forever loop if we ever create 65535 logs
+	//Let's quit if we ever get to 65534
+	//65534 logs is quite possible if you have a system with lots of power on/off cycles
+	if(new_file_number == 65534)
+	{
+		//Gracefully drop out to command prompt with some error
+		uart_puts_p(PSTR("!Too many logs:1!"));
+
+		return; //Bail!
+	}
+	
+	//If we made it this far, everything looks good - let's create the new LOG and write to it
 
 	char* new_file_name = general_buffer;
 	sprintf(new_file_name, "LOG%05u.txt", new_file_number);
@@ -689,6 +705,18 @@ void newlog(void)
 		//Increment the file number because this file name is already taken
 		new_file_number++;
 		sprintf(new_file_name, "LOG%05u.txt", new_file_number);
+		
+		//Shoot! There's still a chance that we can have too many logs here
+		//For example, if all the way up to LOG65533 was already on card, 
+		//then reset the EEPROM log number, 65533 would be skipped, 65534 would be created
+		//and the above 65534 test would be skipped
+		
+		if(new_file_number > 65533)
+		{
+			//Gracefully drop out to command prompt with some error
+			uart_puts_p(PSTR("!Too many logs:2!"));
+			return; //Bail!
+		}
 	}
 
 	//Add one the new_file_number for the next power-up
@@ -1715,8 +1743,13 @@ void system_menu(void)
 		if(strcmp_P(command, PSTR("4")) == 0)
 		{
 			uart_puts_p(PSTR("New file number reset to zero\n"));
-			EEPROM_write(LOCATION_FILE_NUMBER_LSB, 0);
-			EEPROM_write(LOCATION_FILE_NUMBER_MSB, 0);
+			//EEPROM_write(LOCATION_FILE_NUMBER_LSB, 0);
+			//EEPROM_write(LOCATION_FILE_NUMBER_MSB, 0);
+
+			//65533 log testing
+			EEPROM_write(LOCATION_FILE_NUMBER_LSB, 0xFD);
+			EEPROM_write(LOCATION_FILE_NUMBER_MSB, 0xFF);
+
 			return;
 		}
 	}
