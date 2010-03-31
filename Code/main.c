@@ -126,6 +126,37 @@
 	Record buffer after timeout:
 	Create new log. Type 20 characters and wait 5 seconds. Unit should auto-record buffer. Power down unit. 
 	Power up unit and verify LOG has 20 characters recorded.	
+	
+
+	v1.4
+	Added exit options to the two menus (set and baud)
+	Also added display of current settin to two menus (Ex: "Baud currently: 57600bps")
+	
+	Added '!' infront of 'error opening'. This pops up if there is an error while trying to append
+	to a freshly created new log (ex: LOG00548.txt is created, then errors out because it cannot append).
+	'!' was added so that user can parse against it.
+	
+	Replicated logging errors at 57600 using 5V Arduino
+	Unit would systematically glitch during logging of 111054 bytes
+	
+	Increasing buffer to 1000 characters caused URU error.
+	URU: Unit Resets Unexpectedly
+	
+	To recreate URU error. Type "append ". Include the space. If you get "!error opening", then things are 
+	fine. If you get "!error opening#" where # is a weird character, then type 'ls' and the unit will 
+	unexpectedly reset (URU error). I believe this is attributed to a memory overrun somewhere in the
+	FAT system.
+	
+	Changed buffer size to 900 and declared the character buffer as volatile
+	#define BUFF_LEN 900
+	volatile char input_buffer[BUFF_LEN];
+	
+	This increase to the buffer allows for clean logging of 444055 bytes with no URU errors.
+	
+	Experimenting with Scott's SD cards (customer gave cards on loan for recreating logging errors):
+	Card with single ~740mb file produces errors when trying to open/append to new log. 
+	Card with less stuff on it logs full 444055 bytes correctly.
+
 
 */
 
@@ -361,11 +392,22 @@ unsigned char EEPROM_read(uint16_t uiAddress);
 void delay_us(uint16_t x);
 void delay_ms(uint16_t x);
 
+//These functions were added for wild card delete and search
+//======================================================
+uint8_t count_cmd_args(void);
+char* get_cmd_arg(uint8_t index);
+void add_cmd_arg(char* buffer, uint8_t buffer_length);
+uint8_t split_cmd_line_args(char* buffer, uint8_t buffer_length);
+uint8_t too_many_arguments_error(uint8_t limit, char* command);
+char* is_number(char* buffer, uint8_t buffer_length);
+uint8_t wildcmp(const char* wild, const char* string);
+
 struct command_arg
 {
 	char* arg; 			//Points to first character in command line argument
 	uint8_t arg_length; // Length of command line argument
 };
+//End Wildcard Functions ===============================
 
 
 #define sbi(port, port_pin)   ((port) |= (uint8_t)(1 << port_pin))
@@ -404,156 +446,10 @@ struct partition_struct* partition;
 struct fat_dir_struct* dd;
 static struct command_arg cmd_arg[MAX_COUNT_COMMAND_LINE_ARGS];
 
-#define BUFF_LEN 512
-char input_buffer[BUFF_LEN];
+#define BUFF_LEN 900
+volatile char input_buffer[BUFF_LEN];
 char general_buffer[25];
 uint16_t read_spot, checked_spot;
-
-//Returns the number of command line arguments
-uint8_t count_cmd_args(void)
-{
-	uint8_t count = 0;
-	uint8_t i = 0;
-	for(; i < MAX_COUNT_COMMAND_LINE_ARGS; i++)
-		if((cmd_arg[i].arg != 0) && (cmd_arg[i].arg_length > 0))
-			count++;
-
-	return count;
-}
-
-//Safe index handling of command line arguments
-char* get_cmd_arg(uint8_t index)
-{
-	memset(general_buffer, 0, sizeof(general_buffer));
-	if (index < MAX_COUNT_COMMAND_LINE_ARGS)
-		if ((cmd_arg[index].arg != 0) && (cmd_arg[index].arg_length > 0))
-			return strncpy(general_buffer, cmd_arg[index].arg, MIN(sizeof(general_buffer), cmd_arg[index].arg_length));
-
-	return 0;
-}
-
-//Safe adding of command line arguments
-void add_cmd_arg(char* buffer, uint8_t buffer_length)
-{
-	uint8_t count = count_cmd_args();
-	if (count < MAX_COUNT_COMMAND_LINE_ARGS)
-	{
-		cmd_arg[count].arg = buffer;
-		cmd_arg[count].arg_length = buffer_length;
-	}
-}
-
-//Split the command line arguments
-//Example:
-//	read <filename> <start> <length>
-//	arg[0] -> read
-//	arg[1] -> <filename>
-//	arg[2] -> <start>
-//	arg[3] -> <end>
-uint8_t split_cmd_line_args(char* buffer, uint8_t buffer_length)
-{
-	uint8_t arg_index_start = 0;
-	uint8_t arg_index_end = 1;
-
-	//Reset command line arguments
-	memset(cmd_arg, 0, sizeof(cmd_arg));
-
-	//Split the command line arguments
-	while (arg_index_end < buffer_length)
-	{
-		//Search for ASCII 32 (Space)
-		if ((buffer[arg_index_end] == ' ') || (arg_index_end + 1 == buffer_length))
-		{
-			//Fix for last character
-			if (arg_index_end + 1 == buffer_length)
-				arg_index_end = buffer_length;
-
-			//Add this command line argument to the list
-			add_cmd_arg(&(buffer[arg_index_start]), (arg_index_end - arg_index_start));
-			arg_index_start = ++arg_index_end;
-		}
-
-		arg_index_end++;
-	}
-
-	//Return the number of available command line arguments
-	return count_cmd_args();
-}
-
-//Call this function to ensure the number of parameters do not
-//exceed limit. The main purpose of this function is to avoid
-//entering file names containing spaces.
-uint8_t too_many_arguments_error(uint8_t limit, char* command)
-{
-	uint8_t count;
-	if ((count = count_cmd_args()) > limit)
-	{
-		uart_puts_p(PSTR("too many arguments("));
-		uart_putw_dec(count);
-		uart_puts_p(PSTR("): "));
-		uart_puts(command);
-		uart_putc('\n');
-		return 1;
-	}
-
-	return 0;
-}
-
-//Returns char* pointer to buffer if buffer is a valid number or
-//0(null) if not.
-char* is_number(char* buffer, uint8_t buffer_length)
-{
-	for (int i = 0; i < buffer_length; i++)
-		if (!isdigit(buffer[i]))
-			return 0;
-
-	return buffer;
-}
-
-//Wildcard string compare.
-//Written by Jack Handy - jakkhandy@hotmail.com
-//http://www.codeproject.com/KB/string/wildcmp.aspx
-uint8_t wildcmp(const char* wild, const char* string)
-{
-
-	const char *cp = 0;
-	const char *mp = 0;
-
-	while (*string && (*wild != '*'))
-	{
-		if ((*wild != *string) && (*wild != '?'))
-		return 0;
-
-		wild++;
-		string++;
-	}
-
-	while (*string)
-	{
-		if (*wild == '*')
-		{
-			if (!(*(++wild)))
-				return 1;
-
-			mp = wild;
-			cp = string+1;
-		}
-		else if ((*wild == *string) || (*wild== '?'))
-		{
-			wild++;
-			string++;
-		}
-		else
-		{
-			wild = mp;
-			string = cp++;
-		}
-	}
-
-	while (*wild == '*')
-		wild++;
-  return !(*wild);
-}
 
 //Circular buffer UART RX interrupt
 //Is only used during append
@@ -1247,7 +1143,7 @@ uint8_t append_file(char* file_name)
 	struct fat_file_struct* fd = open_file_in_dir(fs, dd, file_name);
 	if(!fd)
 	{
-		uart_puts_p(PSTR("error opening "));
+		uart_puts_p(PSTR("!error opening "));
 		uart_puts(file_name);
 		uart_putc('\n');
 		return(0);
@@ -1260,7 +1156,7 @@ uint8_t append_file(char* file_name)
 	//Seeks the end of the file : offset = EOF location
 	if(!fat_seek_file(fd, &offset, FAT_SEEK_END))
 	{
-		uart_puts_p(PSTR("error seeking on "));
+		uart_puts_p(PSTR("!error seeking on "));
 		uart_puts(file_name);
 		uart_putc('\n');
 
@@ -1719,7 +1615,7 @@ uint8_t print_disk_info(const struct fat_fs_struct* fs)
 
 void print_menu(void)
 {
-	uart_puts_p(PSTR("\nOpenLog v1.3\n"));
+	uart_puts_p(PSTR("\nOpenLog v1.4\n"));
 	uart_puts_p(PSTR("Available commands:\n"));
 	uart_puts_p(PSTR("new <file>\t\t: Creates <file>\n"));
 	uart_puts_p(PSTR("append <file>\t\t: Appends text to end of <file>. The text is read from the UART in a stream and is not echoed. Finish by sending Ctrl+z (ASCII 26)\n"));
@@ -1747,14 +1643,25 @@ void baud_menu(void)
 {
 	char buffer[5];
 
+	uint8_t uart_speed = EEPROM_read(LOCATION_BAUD_SETTING);
+	
 	while(1)
 	{
 		uart_puts_p(PSTR("\nBaud Configuration:\n"));
-		
-		uart_puts_p(PSTR("1) Set Baud rate 2400\n"));
-		uart_puts_p(PSTR("2) Set Baud rate 9600\n"));
-		uart_puts_p(PSTR("3) Set Baud rate 57600\n"));
-		uart_puts_p(PSTR("4) Set Baud rate 115200\n"));
+	
+		uart_puts_p(PSTR("Current: "));
+		if(uart_speed == BAUD_2400) uart_puts_p(PSTR("24"));
+		if(uart_speed == BAUD_9600) uart_puts_p(PSTR("96"));
+		if(uart_speed == BAUD_57600) uart_puts_p(PSTR("576"));
+		if(uart_speed == BAUD_115200) uart_puts_p(PSTR("1152"));
+		uart_puts_p(PSTR("00 bps\n"));
+	
+		uart_puts_p(PSTR("Change to:\n"));
+		uart_puts_p(PSTR("1) 2400 bps\n"));
+		uart_puts_p(PSTR("2) 9600 bps\n"));
+		uart_puts_p(PSTR("3) 57600 bps\n"));
+		uart_puts_p(PSTR("4) 115200 bps\n"));
+		uart_puts_p(PSTR("5) Exit\n"));
 
 		//print prompt
 		uart_putc('>');
@@ -1802,6 +1709,12 @@ void baud_menu(void)
 			blink_error(ERROR_NEW_BAUD);
 			return;
 		}
+		if(strcmp_P(command, PSTR("5")) == 0)
+		{
+			uart_puts_p(PSTR("\nExiting\n"));
+			//Do nothing, just exit
+			return;
+		}
 	}
 }
 
@@ -1814,15 +1727,24 @@ void system_menu(void)
 {
 	char buffer[5];
 
+	uint8_t system_mode = EEPROM_read(LOCATION_SYSTEM_SETTING);
+
 	while(1)
 	{
 		uart_puts_p(PSTR("\nSystem Configuration\n"));
-		uart_puts_p(PSTR("\nBoot to:\n"));
+
+		uart_puts_p(PSTR("Current boot mode: "));
+		if(system_mode == MODE_NEWLOG) uart_puts_p(PSTR("New file"));
+		if(system_mode == MODE_SEQLOG) uart_puts_p(PSTR("Append file"));
+		if(system_mode == MODE_COMMAND) uart_puts_p(PSTR("Command"));
+		uart_puts_p(PSTR("\n"));
 		
+		uart_puts_p(PSTR("Change to:\n"));
 		uart_puts_p(PSTR("1) New file logging\n"));
 		uart_puts_p(PSTR("2) Append file logging\n"));
 		uart_puts_p(PSTR("3) Command prompt\n"));
 		uart_puts_p(PSTR("4) Reset new file number\n"));
+		uart_puts_p(PSTR("5) Exit\n"));
 
 		//print prompt
 		uart_putc('>');
@@ -1864,8 +1786,168 @@ void system_menu(void)
 
 			return;
 		}
+		if(strcmp_P(command, PSTR("5")) == 0)
+		{
+			//Do nothing, just exit
+			uart_puts_p(PSTR("Exiting\n"));
+			return;
+		}
 	}
 }
+
+
+//These functions were added for wild card delete and search
+//=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+
+//Returns the number of command line arguments
+uint8_t count_cmd_args(void)
+{
+	uint8_t count = 0;
+	uint8_t i = 0;
+	for(; i < MAX_COUNT_COMMAND_LINE_ARGS; i++)
+		if((cmd_arg[i].arg != 0) && (cmd_arg[i].arg_length > 0))
+			count++;
+
+	return count;
+}
+
+//Safe index handling of command line arguments
+char* get_cmd_arg(uint8_t index)
+{
+	memset(general_buffer, 0, sizeof(general_buffer));
+	if (index < MAX_COUNT_COMMAND_LINE_ARGS)
+		if ((cmd_arg[index].arg != 0) && (cmd_arg[index].arg_length > 0))
+			return strncpy(general_buffer, cmd_arg[index].arg, MIN(sizeof(general_buffer), cmd_arg[index].arg_length));
+
+	return 0;
+}
+
+//Safe adding of command line arguments
+void add_cmd_arg(char* buffer, uint8_t buffer_length)
+{
+	uint8_t count = count_cmd_args();
+	if (count < MAX_COUNT_COMMAND_LINE_ARGS)
+	{
+		cmd_arg[count].arg = buffer;
+		cmd_arg[count].arg_length = buffer_length;
+	}
+}
+
+//Split the command line arguments
+//Example:
+//	read <filename> <start> <length>
+//	arg[0] -> read
+//	arg[1] -> <filename>
+//	arg[2] -> <start>
+//	arg[3] -> <end>
+uint8_t split_cmd_line_args(char* buffer, uint8_t buffer_length)
+{
+	uint8_t arg_index_start = 0;
+	uint8_t arg_index_end = 1;
+
+	//Reset command line arguments
+	memset(cmd_arg, 0, sizeof(cmd_arg));
+
+	//Split the command line arguments
+	while (arg_index_end < buffer_length)
+	{
+		//Search for ASCII 32 (Space)
+		if ((buffer[arg_index_end] == ' ') || (arg_index_end + 1 == buffer_length))
+		{
+			//Fix for last character
+			if (arg_index_end + 1 == buffer_length)
+				arg_index_end = buffer_length;
+
+			//Add this command line argument to the list
+			add_cmd_arg(&(buffer[arg_index_start]), (arg_index_end - arg_index_start));
+			arg_index_start = ++arg_index_end;
+		}
+
+		arg_index_end++;
+	}
+
+	//Return the number of available command line arguments
+	return count_cmd_args();
+}
+
+//Call this function to ensure the number of parameters do not
+//exceed limit. The main purpose of this function is to avoid
+//entering file names containing spaces.
+uint8_t too_many_arguments_error(uint8_t limit, char* command)
+{
+	uint8_t count;
+	if ((count = count_cmd_args()) > limit)
+	{
+		uart_puts_p(PSTR("too many arguments("));
+		uart_putw_dec(count);
+		uart_puts_p(PSTR("): "));
+		uart_puts(command);
+		uart_putc('\n');
+		return 1;
+	}
+
+	return 0;
+}
+
+//Returns char* pointer to buffer if buffer is a valid number or
+//0(null) if not.
+char* is_number(char* buffer, uint8_t buffer_length)
+{
+	for (int i = 0; i < buffer_length; i++)
+		if (!isdigit(buffer[i]))
+			return 0;
+
+	return buffer;
+}
+
+//Wildcard string compare.
+//Written by Jack Handy - jakkhandy@hotmail.com
+//http://www.codeproject.com/KB/string/wildcmp.aspx
+uint8_t wildcmp(const char* wild, const char* string)
+{
+
+	const char *cp = 0;
+	const char *mp = 0;
+
+	while (*string && (*wild != '*'))
+	{
+		if ((*wild != *string) && (*wild != '?'))
+		return 0;
+
+		wild++;
+		string++;
+	}
+
+	while (*string)
+	{
+		if (*wild == '*')
+		{
+			if (!(*(++wild)))
+				return 1;
+
+			mp = wild;
+			cp = string+1;
+		}
+		else if ((*wild == *string) || (*wild== '?'))
+		{
+			wild++;
+			string++;
+		}
+		else
+		{
+			wild = mp;
+			string = cp++;
+		}
+	}
+
+	while (*wild == '*')
+		wild++;
+  return !(*wild);
+}
+
+//End wildcard functions
+//=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+
 
 #if FAT_DATETIME_SUPPORT
 void get_datetime(uint16_t* year, uint8_t* month, uint8_t* day, uint8_t* hour, uint8_t* min, uint8_t* sec)
