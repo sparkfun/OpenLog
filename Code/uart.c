@@ -62,8 +62,9 @@
 #define BAUD 115200UL
 //#define BAUD 19200UL
 #define UBRRVAL (F_CPU/(BAUD*16)-1)
-//#define USE_SLEEP 1
-#define USE_SLEEP 0
+
+//#define USE_SLEEP 0
+#define USE_SLEEP 1
 
 void uart_init(uint8_t uart_speed)
 {
@@ -73,29 +74,22 @@ void uart_init(uint8_t uart_speed)
 	if(uart_speed == 1) new_ubrr = 207; //9600
 	if(uart_speed == 2) new_ubrr = 34; //57600
 	if(uart_speed == 3) new_ubrr = 16; //115200
+	//New speeds added 4-7-2010
+	//1200bps is so rare, and is not on the ATmega328 datasheet that I skipped it
+	//38400bps is also rare, and ubrr of 51 oddly causes errors at 16MHz, so I skipped it as well
+	if(uart_speed == 4) new_ubrr = 416; //4800
+	if(uart_speed == 5) new_ubrr = 103; //19200
+	//if(uart_speed == 6) new_ubrr = 51; //38400
 
 	UCSR0A = (1<<U2X0); //Double the UART transfer rate
 	//Slightly more accurate UBRR calculation
 	UBRR0L = new_ubrr;
 	UBRR0H = new_ubrr >> 8;
 
-
-    /* set baud rate */
-    //UBRRH = UBRRVAL >> 8;
-    //UBRRL = UBRRVAL & 0xff;
-    /* set frame format: 8 bit, no parity, 1 bit */
-    //UCSRC = UCSRC_SELECT | (1 << UCSZ1) | (1 << UCSZ0);
-    /* enable serial receiver and transmitter */
-	
-	//Some bootloaders set the UART to double speed - make sure it's single speed
-	//UCSR0A = (1<<U2X0); //Double the UART transfer rate
-	//UCSR0A = 0; //Single speed UART
-	
 #if !USE_SLEEP
     UCSRB = (1 << RXEN) | (1 << TXEN);
 #else
-    //UCSRB = (1 << RXEN) | (1 << TXEN) | (1 << RXCIE);
-    UCSRB = (1 << RXEN) | (1 << TXEN);
+    UCSRB = (1 << RXEN) | (1 << TXEN) | (1 << RXCIE);
 #endif
 
 }
@@ -199,22 +193,39 @@ uint8_t uart_getc()
 {
     /* wait until receive buffer is full */
 #if USE_SLEEP
-    uint8_t sreg = SREG;
+
+	//During append file, we are disabling the RX interrupt, so we need to bring it back
+	UCSR0B |= (1<<RXCIE0); //Enable receive interrupts
+
     sei();
+	//#define STAT1	5
+	//PORTD &= ~(1<<STAT1); //Turn off LED to save more power - if we turn off the LED before the ISR, the LED never comes on
+	//I'd rather have the LED blink
+	sleep_mode();
+	cli();
+	
+	//Now that we've woken up, we assume that the UART ISR has done its job and loaded UDR into the buffer
+	//We need to look at the last used spot in the buffer which is read_spot - 1
+	char b;
+	if(read_spot == 0)
+		b = input_buffer[sizeof(input_buffer) - 1];
+	else
+		b = input_buffer[read_spot - 1];
 
-    while(!(UCSRA & (1 << RXC)))
-        sleep_mode();
+    if(b == '\r')
+        b = '\n';
 
-    SREG = sreg;
+	return b;
 #else
     while(!(UCSRA & (1 << RXC)));
-#endif
 
     uint8_t b = UDR;
     if(b == '\r')
         b = '\n';
 
     return b;
+#endif
+
 }
 
 //EMPTY_INTERRUPT(USART_RXC_vect)

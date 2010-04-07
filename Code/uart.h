@@ -13,6 +13,10 @@
 #include <stdint.h>
 #include <avr/pgmspace.h>
 
+extern volatile char input_buffer[900];
+//I can't figure out how to pass in an external define for the BUFF_LEN in main.c, so it's hard coded. Compiler will throw error if they don't agree
+extern volatile uint16_t read_spot;
+
 #ifdef __cplusplus
 extern "C"
 {

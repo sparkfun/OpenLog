@@ -51,8 +51,8 @@
 	SD vs HCSD configuration is found in sd_raw_config.h - Currently only 512MB, 1GB, 2GB, and some 
 	4GB cards work (not yet compatible with HCSD cards).
 
-	STAT1 LED is sitting on PD5 (Arduino D5)
-	STAT2 LED is sitting on PB5 (Arduino D13)
+	STAT1 LED is sitting on PD5 (Arduino D5) - toggles when character is received
+	STAT2 LED is sitting on PB5 (Arduino D13) - toggles when SPI writes happen
 
 	LED Flashing errors @ 2Hz:
 	No SD card - 3 blinks
@@ -157,26 +157,23 @@
 	Card with single ~740mb file produces errors when trying to open/append to new log. 
 	Card with less stuff on it logs full 444055 bytes correctly.
 
+	
+	v1.5
+	Added 4800bps and 19200bps support
+	
+	Added power saving features. Current consumption at 5V is now:
+	In default append mode: 
+		6.6/5.5mA while receiving characters (LED On/Off)
+		2.1mA during idle
+	In command mode: 3.2/2.1mA (LED On/Off)
+	
+	So if you're actively throwing characters at the logger, it will be ~6mA. If you send the logger
+	characters then delay 5-10 seconds, current will be ~2.5mA. (Unit records the characters in the buffer
+	and goes into idle more if no characters are received after 5 seconds)
+	
+	These power savings required some significant changes to uart.c / uart_getc()
 
 */
-
-#include <string.h>
-#include <stdio.h>
-#include <ctype.h>
-#include <avr/pgmspace.h>
-#include <avr/interrupt.h>
-
-#include "fat.h"
-#include "fat_config.h"
-#include "partition.h"
-#include "sd_raw.h"
-#include "sd_raw_config.h"
-#include "uart.h"
-
-
-//Setting DEBUG to 1 will cause extra serial messages to appear
-//such as "Media Init Complete!" indicating the SD card was initalized
-#define DEBUG 0
 
 /**
  * \mainpage MMC/SD/SDHC card library
@@ -364,7 +361,30 @@
  */
 
 
+#include <string.h>
+#include <stdio.h>
+#include <ctype.h>
+#include <avr/pgmspace.h>
+#include <avr/interrupt.h>
+#include <avr/sleep.h>
 
+#include "fat.h"
+#include "fat_config.h"
+#include "partition.h"
+#include "sd_raw.h"
+#include "sd_raw_config.h"
+
+#define BUFF_LEN 900
+volatile char input_buffer[BUFF_LEN];
+char general_buffer[25];
+volatile uint16_t read_spot, checked_spot;
+
+#include "uart.h"
+
+
+//Setting DEBUG to 1 will cause extra serial messages to appear
+//such as "Media Init Complete!" indicating the SD card was initalized
+#define DEBUG 0
 
 //Function declarations
 static uint8_t read_line(char* buffer, uint8_t buffer_length);
@@ -434,6 +454,8 @@ struct command_arg
 #define BAUD_9600	1
 #define BAUD_57600	2
 #define BAUD_115200	3
+#define BAUD_4800	4
+#define BAUD_19200	5
 
 #define MODE_NEWLOG	0
 #define MODE_SEQLOG 1
@@ -445,11 +467,6 @@ struct fat_fs_struct* fs;
 struct partition_struct* partition;
 struct fat_dir_struct* dd;
 static struct command_arg cmd_arg[MAX_COUNT_COMMAND_LINE_ARGS];
-
-#define BUFF_LEN 900
-volatile char input_buffer[BUFF_LEN];
-char general_buffer[25];
-uint16_t read_spot, checked_spot;
 
 //Circular buffer UART RX interrupt
 //Is only used during append
@@ -495,6 +512,14 @@ void ioinit(void)
     TCCR0B = (1<<CS01); //Set Prescaler to clk/8 : 1click = 1us(assume we are running at internal 8MHz). CS01=1 
     //Since we are running at 16MHz, this is a hack job. We will double the count during delay_us function.
 	//TCCR0B = (1<<CS01)|(1<<CS00); //Set Prescaler to clk/64
+
+	//Running power is 7.66mA at 3.3V / 7.23 at 5V before power tweaking
+	//Let's see if we can shut off some peripherals and save some power
+	PRR |= (1<<PRTWI) | (1<<PRTIM2) | (1<<PRTIM1) | (1<<PRADC); //Shut off TWI, Timer2, Timer1, ADC
+	//Running power is 7.02mA at 3.3V / 6.66mA at 5V after power tweaking - so a little bit, and it still works!
+	
+	set_sleep_mode(SLEEP_MODE_IDLE); //I believe this is the lowest we can go and still get woken up by UART
+	sleep_enable(); //Set Sleep Enable bit to 1
 
     //1 = output, 0 = input
     DDRD |= (1<<STAT1); //PORTD (STAT1 on PD5)
@@ -1219,8 +1244,9 @@ uint8_t append_file(char* file_name)
 					unsigned sp = spot; // start of new buffer
 					
 					// read_spot may have moved, copy
-	cli();
-					while( checked_spot != read_spot ) 
+					cli();
+					
+					while(checked_spot != read_spot) 
 					{
 						input_buffer[spot++] = input_buffer[checked_spot++];
 						if( checked_spot >= BUFF_LEN )
@@ -1229,13 +1255,20 @@ uint8_t append_file(char* file_name)
 					
 					read_spot = spot; // set insertion to end of copy
 					checked_spot = sp; // reset checked to beginning of copy
-	sei();
+					
+					sei();
 				}
 				
 				sd_raw_sync(); //Sync all newly written data to card
 
+				//Hang out while we wait for the interrupt to occur and advance read_spot
 				while(checked_spot == read_spot)
-						delay_ms(1); //Hang out while we wait for the interrupt to occur and advance read_spot
+				{
+					PORTD &= ~(1<<STAT1); //Turn off LED to save more power
+
+					sleep_mode(); //Put CPU to sleep, UART ISR wakes us up
+					//delay_ms(1); 
+				}
 			}
 
 			delay_ms(1); //Hang out while we wait for the interrupt to occur and advance read_spot
@@ -1402,10 +1435,10 @@ uint8_t read_line(char* buffer, uint8_t buffer_length)
     uint8_t read_length = 0;
     while(read_length < buffer_length - 1)
     {
-		PORTD ^= (1<<STAT1); //Blink the stat LED while typing
-		PORTB ^= (1<<STAT2); //Blink the stat LED while typing
-
         uint8_t c = uart_getc();
+
+		//PORTD ^= (1<<STAT1); //Blink the stat LED while typing - this is taken care of in the UART ISR
+		//PORTB ^= (1<<STAT2); //Blink the stat LED while typing - I don't want the SPI lines toggling
 
         if(c == 0x08 || c == 0x7f)
         {
@@ -1615,7 +1648,7 @@ uint8_t print_disk_info(const struct fat_fs_struct* fs)
 
 void print_menu(void)
 {
-	uart_puts_p(PSTR("\nOpenLog v1.4\n"));
+	uart_puts_p(PSTR("\nOpenLog v1.5\n"));
 	uart_puts_p(PSTR("Available commands:\n"));
 	uart_puts_p(PSTR("new <file>\t\t: Creates <file>\n"));
 	uart_puts_p(PSTR("append <file>\t\t: Appends text to end of <file>. The text is read from the UART in a stream and is not echoed. Finish by sending Ctrl+z (ASCII 26)\n"));
@@ -1650,18 +1683,22 @@ void baud_menu(void)
 		uart_puts_p(PSTR("\nBaud Configuration:\n"));
 	
 		uart_puts_p(PSTR("Current: "));
+		if(uart_speed == BAUD_4800) uart_puts_p(PSTR("48"));
 		if(uart_speed == BAUD_2400) uart_puts_p(PSTR("24"));
 		if(uart_speed == BAUD_9600) uart_puts_p(PSTR("96"));
+		if(uart_speed == BAUD_19200) uart_puts_p(PSTR("192"));
 		if(uart_speed == BAUD_57600) uart_puts_p(PSTR("576"));
 		if(uart_speed == BAUD_115200) uart_puts_p(PSTR("1152"));
 		uart_puts_p(PSTR("00 bps\n"));
 	
 		uart_puts_p(PSTR("Change to:\n"));
 		uart_puts_p(PSTR("1) 2400 bps\n"));
-		uart_puts_p(PSTR("2) 9600 bps\n"));
-		uart_puts_p(PSTR("3) 57600 bps\n"));
-		uart_puts_p(PSTR("4) 115200 bps\n"));
-		uart_puts_p(PSTR("5) Exit\n"));
+		uart_puts_p(PSTR("2) 4800 bps\n"));
+		uart_puts_p(PSTR("3) 9600 bps\n"));
+		uart_puts_p(PSTR("4) 19200 bps\n"));
+		uart_puts_p(PSTR("5) 57600 bps\n"));
+		uart_puts_p(PSTR("6) 115200 bps\n"));
+		uart_puts_p(PSTR("x) Exit\n"));
 
 		//print prompt
 		uart_putc('>');
@@ -1684,6 +1721,15 @@ void baud_menu(void)
 		}
 		if(strcmp_P(command, PSTR("2")) == 0)
 		{
+			uart_puts_p(PSTR("\nGoing to 4800bps...\n"));
+
+			//Set baud rate to 4800
+			EEPROM_write(LOCATION_BAUD_SETTING, BAUD_4800);
+			blink_error(ERROR_NEW_BAUD);
+			return;
+		}
+		if(strcmp_P(command, PSTR("3")) == 0)
+		{
 			uart_puts_p(PSTR("\nGoing to 9600bps...\n"));
 
 			//Set baud rate to 9600
@@ -1691,7 +1737,16 @@ void baud_menu(void)
 			blink_error(ERROR_NEW_BAUD);
 			return;
 		}
-		if(strcmp_P(command, PSTR("3")) == 0)
+		if(strcmp_P(command, PSTR("4")) == 0)
+		{
+			uart_puts_p(PSTR("\nGoing to 19200bps...\n"));
+
+			//Set baud rate to 19200
+			EEPROM_write(LOCATION_BAUD_SETTING, BAUD_19200);
+			blink_error(ERROR_NEW_BAUD);
+			return;
+		}
+		if(strcmp_P(command, PSTR("5")) == 0)
 		{
 			uart_puts_p(PSTR("\nGoing to 57600bps...\n"));
 
@@ -1700,7 +1755,7 @@ void baud_menu(void)
 			blink_error(ERROR_NEW_BAUD);
 			return;
 		}
-		if(strcmp_P(command, PSTR("4")) == 0)
+		if(strcmp_P(command, PSTR("6")) == 0)
 		{
 			uart_puts_p(PSTR("\nGoing to 115200bps...\n"));
 
@@ -1709,7 +1764,7 @@ void baud_menu(void)
 			blink_error(ERROR_NEW_BAUD);
 			return;
 		}
-		if(strcmp_P(command, PSTR("5")) == 0)
+		if(strcmp_P(command, PSTR("x")) == 0)
 		{
 			uart_puts_p(PSTR("\nExiting\n"));
 			//Do nothing, just exit
@@ -1744,7 +1799,7 @@ void system_menu(void)
 		uart_puts_p(PSTR("2) Append file logging\n"));
 		uart_puts_p(PSTR("3) Command prompt\n"));
 		uart_puts_p(PSTR("4) Reset new file number\n"));
-		uart_puts_p(PSTR("5) Exit\n"));
+		uart_puts_p(PSTR("x) Exit\n"));
 
 		//print prompt
 		uart_putc('>');
@@ -1786,7 +1841,7 @@ void system_menu(void)
 
 			return;
 		}
-		if(strcmp_P(command, PSTR("5")) == 0)
+		if(strcmp_P(command, PSTR("x")) == 0)
 		{
 			//Do nothing, just exit
 			uart_puts_p(PSTR("Exiting\n"));
