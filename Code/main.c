@@ -8,7 +8,7 @@
 
 /*
     12-3-09
-    Copyright SparkFun Electronics© 2009
+    Copyright SparkFun Electronics© 2010
     Nathan Seidle
     spark at sparkfun.com
     
@@ -69,6 +69,7 @@
 	Input voltage on VCC can be 3.3 to 12V. Input voltage on RX-I pin must not exceed 6V. Output voltage on
 	TX-O pin will not be greater than 3.3V. This may cause problems with some systems - for example if your
 	attached microcontroller requires 4V minimum for serial communication (this is rare).
+
 	
 	v1.1
 	Adding better defines for EEPROM settings
@@ -172,6 +173,22 @@
 	and goes into idle more if no characters are received after 5 seconds)
 	
 	These power savings required some significant changes to uart.c / uart_getc()
+
+	
+	v1.51 check_emergency_reset, default break character is ctrl+z 3 times, example Arduino sketch
+	
+	Added function from mungewell - check_emergency_reset. This has improved testing of the RX pin.
+	There was potential to get a false baud reset. There is still a chance but it's now much less likely.
+	
+	If OpenLog is attached to a Arduino, during bootloading of the Arduino, ctrl+z will most likely be sent
+	to the Arduino from the computer. This character will cause OpenLog to drop to command mode - probably
+	not what we want. So I added user selectable character (ctrl+x or '$' for example) and I added
+	user selectable number of escape characters to look for in a row (example is 1 or 2 or 3, '$$$' is a
+	common escape sequence). The default is now ctrl+z sent 3 times in a row.
+	
+	Added an example Arduino sketch (from ScottH) to GitHub so that people can easily see how to send characters to
+	OpenLog. Not much to it, but it does allow us to test large amounts of text thrown at OpenLog
+	at 57600bps.
 
 */
 
@@ -403,6 +420,7 @@ uint8_t append_file(char* file_name);
 void newlog(void);
 void seqlog(void);
 void command_shell(void);
+char check_emergency_reset(void);
 
 void blink_error(uint8_t ERROR_TYPE);
 
@@ -449,6 +467,8 @@ struct command_arg
 #define LOCATION_SYSTEM_SETTING		0x02
 #define LOCATION_FILE_NUMBER_LSB	0x03
 #define LOCATION_FILE_NUMBER_MSB	0x04
+#define LOCATION_ESCAPE_CHAR		0x05
+#define LOCATION_MAX_ESCAPE_CHAR	0x06
 
 #define BAUD_2400	0
 #define BAUD_9600	1
@@ -467,6 +487,9 @@ struct fat_fs_struct* fs;
 struct partition_struct* partition;
 struct fat_dir_struct* dd;
 static struct command_arg cmd_arg[MAX_COUNT_COMMAND_LINE_ARGS];
+
+char setting_escape_character; //This is the ASCII character we look for to break logging, default is ctrl+z
+char setting_max_escape_character; //Number of escape chars before break logging, default is 3
 
 //Circular buffer UART RX interrupt
 //Is only used during append
@@ -525,39 +548,28 @@ void ioinit(void)
     DDRD |= (1<<STAT1); //PORTD (STAT1 on PD5)
     DDRB |= (1<<STAT2); //PORTC (STAT2 on PB5)
 
-	//Check to see if we need an emergency UART reset
-	DDRD |= (1<<0); //Turn the RX pin into an input
-	PORTD |= (1<<0); //Push a 1 onto RX pin to enable internal pull-up
-	if( (PIND & (1<<0)) == 0) //Now check the RX pin. If it's being held low
+	if(check_emergency_reset()) //Look to see if the RX pin is being pulled low
 	{
-		//Wait 2 seconds, blinking LEDs while we wait
-		sbi(PORTC, STAT2); //Set the STAT2 LED
-		for(uint8_t i = 0 ; i < 40 ; i++)
+		//Reset UART to 9600bps
+		EEPROM_write(LOCATION_BAUD_SETTING, BAUD_9600);
+
+		//Reset escape character to ctrl+z
+		EEPROM_write(LOCATION_ESCAPE_CHAR, 26); 
+
+		//Reset number of escape characters to 3
+		EEPROM_write(LOCATION_MAX_ESCAPE_CHAR, 3);
+
+		//Now sit in forever loop indicating system is now at 9600bps
+		sbi(PORTD, STAT1); 
+		sbi(PORTB, STAT2);
+		while(1)
 		{
-			delay_ms(25);
+			delay_ms(500);
 			PORTD ^= (1<<STAT1); //Blink the stat LEDs
-			delay_ms(25);
 			PORTB ^= (1<<STAT2); //Blink the stat LEDs
 		}
-		
-		//Check pin again
-		if( (PIND & (1<<0)) == 0)
-		{
-			//If the pin is still low, then reset UART to 9600bps
-			EEPROM_write(0x01, 1);
-
-			//Now sit in forever loop indicating system is now at 9600bps
-			sbi(PORTD, STAT1); 
-			sbi(PORTB, STAT2);
-			while(1)
-			{
-				delay_ms(500);
-				PORTD ^= (1<<STAT1); //Blink the stat LEDs
-				PORTB ^= (1<<STAT2); //Blink the stat LEDs
-			}
-		}
 	}
-
+	
 	//Read what the current UART speed is from EEPROM memory
 	uint8_t uart_speed;
 	uart_speed = EEPROM_read(LOCATION_BAUD_SETTING);
@@ -565,6 +577,24 @@ void ioinit(void)
 	{
 		uart_speed = BAUD_9600; //Reset UART to 9600 if there is no speed stored
 		EEPROM_write(LOCATION_BAUD_SETTING, BAUD_9600);
+	}
+
+	//Read the escape_character
+	//ASCII(26) is ctrl+z
+	setting_escape_character = EEPROM_read(LOCATION_ESCAPE_CHAR);
+	if(setting_escape_character == 255) 
+	{
+		setting_escape_character = 26; //Reset escape character to ctrl+z
+		EEPROM_write(LOCATION_ESCAPE_CHAR, setting_escape_character);
+	}
+
+	//Read the number of escape_characters to look for
+	//Default is 3
+	setting_max_escape_character = EEPROM_read(LOCATION_MAX_ESCAPE_CHAR);
+	if(setting_max_escape_character == 255) 
+	{
+		setting_max_escape_character = 3; //Reset number of escape characters to 3
+		EEPROM_write(LOCATION_MAX_ESCAPE_CHAR, setting_max_escape_character);
 	}
 
     //Setup uart
@@ -578,6 +608,36 @@ void ioinit(void)
 	//Setup SPI, init SD card, etc
 	init_media();
 	uart_puts_p(PSTR("2"));
+}
+
+//Check to see if we need an emergency UART reset
+//Scan the RX pin for 2 seconds
+//If it's low the entire time, then return 1
+char check_emergency_reset(void)
+{
+	DDRD |= (1<<0); //Turn the RX pin into an input
+	PORTD |= (1<<0); //Push a 1 onto RX pin to enable internal pull-up
+
+	//Quick pin check
+	if( (PIND & (1<<0)) == 1) return 0;
+
+	//Wait 2 seconds, blinking LEDs while we wait
+	sbi(PORTC, STAT2); //Set the STAT2 LED
+	for(uint8_t i = 0 ; i < 40 ; i++)
+	{
+		delay_ms(25);
+		PORTD ^= (1<<STAT1); //Blink the stat LEDs
+
+		if( (PIND & (1<<0)) == 1) return 0;
+
+		delay_ms(25);
+		PORTB ^= (1<<STAT2); //Blink the stat LEDs
+
+		if( (PIND & (1<<0)) == 1) return 0;
+	}		
+
+	//If we make it here, then RX pin stayed low the whole time
+	return 1;
 }
 
 //Log to the same file every time the system boots, sequentially
@@ -1197,6 +1257,8 @@ uint8_t append_file(char* file_name)
 
 	sbi(STAT1_PORT, STAT1); //Turn on indicator LED
 
+	char escape_chars_received = 0;
+	
 	read_spot = 0;
 	checked_spot = 0;
 
@@ -1274,14 +1336,21 @@ uint8_t append_file(char* file_name)
 			delay_ms(1); //Hang out while we wait for the interrupt to occur and advance read_spot
 		}
 
-		if(input_buffer[checked_spot] == 26) //Scan for escape character
+		if(input_buffer[checked_spot] == setting_escape_character) //Scan for escape character
 		{
-			//Disable interrupt and we're done!
-			cli();
-			UCSR0B &= ~(1<<RXCIE0); //Clear receive interrupt enable
+			escape_chars_received++;
 			
-			break;
+			if(escape_chars_received == setting_max_escape_character)
+			{
+				//Disable interrupt and we're done!
+				cli();
+				UCSR0B &= ~(1<<RXCIE0); //Clear receive interrupt enable
+				
+				break;
+			}
 		}
+		else
+			escape_chars_received = 0;
 		
 		checked_spot++;
 
@@ -1648,14 +1717,13 @@ uint8_t print_disk_info(const struct fat_fs_struct* fs)
 
 void print_menu(void)
 {
-	uart_puts_p(PSTR("\nOpenLog v1.5\n"));
+	uart_puts_p(PSTR("\nOpenLog v1.51\n"));
 	uart_puts_p(PSTR("Available commands:\n"));
 	uart_puts_p(PSTR("new <file>\t\t: Creates <file>\n"));
 	uart_puts_p(PSTR("append <file>\t\t: Appends text to end of <file>. The text is read from the UART in a stream and is not echoed. Finish by sending Ctrl+z (ASCII 26)\n"));
 	uart_puts_p(PSTR("write <file> <offset>\t: Writes text to <file>, starting from <offset>. The text is read from the UART, line by line. Finish with an empty line\n"));
 	uart_puts_p(PSTR("rm <file>\t\t: Deletes <file>. Use wildcard to do a wildcard removal of files\n"));
 	uart_puts_p(PSTR("md <directory>\t: Creates a directory called <directory>\n"));
-
 	uart_puts_p(PSTR("cd <directory>\t\t: Changes current working directory to <directory>\n"));
 	uart_puts_p(PSTR("cd ..\t\t: Changes to lower directory in tree\n"));
 	uart_puts_p(PSTR("ls\t\t\t: Shows the content of the current directory. Use wildcard to do a wildcard listing of files in current directory\n"));
@@ -1664,8 +1732,8 @@ void print_menu(void)
 	uart_puts_p(PSTR("size <file>\t\t: Write size of file to terminal\n"));
 	uart_puts_p(PSTR("disk\t\t\t: Shows card manufacturer, status, filesystem capacity and free storage space\n"));
 	uart_puts_p(PSTR("init\t\t\t: Reinitializes and reopens the memory card\n"));
-
 	uart_puts_p(PSTR("sync\t\t\t: Ensures all buffered data is written to the card\n"));
+
 	uart_puts_p(PSTR("\nMenus:\n"));
 	uart_puts_p(PSTR("set\t\t\t: Menu to configure system boot mode\n"));
 	uart_puts_p(PSTR("baud\t\t\t: Menu to configure baud rate\n"));
@@ -1793,12 +1861,20 @@ void system_menu(void)
 		if(system_mode == MODE_SEQLOG) uart_puts_p(PSTR("Append file"));
 		if(system_mode == MODE_COMMAND) uart_puts_p(PSTR("Command"));
 		uart_puts_p(PSTR("\n"));
+
+		uart_puts_p(PSTR("Current escape character and amount: "));
+		uart_putdw_dec(setting_escape_character);
+		uart_puts_p(PSTR(" x "));
+		uart_putdw_dec(setting_max_escape_character);
+		uart_puts_p(PSTR("\n"));
 		
 		uart_puts_p(PSTR("Change to:\n"));
 		uart_puts_p(PSTR("1) New file logging\n"));
 		uart_puts_p(PSTR("2) Append file logging\n"));
 		uart_puts_p(PSTR("3) Command prompt\n"));
 		uart_puts_p(PSTR("4) Reset new file number\n"));
+		uart_puts_p(PSTR("5) New escape character\n"));
+		uart_puts_p(PSTR("6) Number of escape characters\n"));
 		uart_puts_p(PSTR("x) Exit\n"));
 
 		//print prompt
@@ -1838,7 +1914,34 @@ void system_menu(void)
 			//65533 log testing
 			//EEPROM_write(LOCATION_FILE_NUMBER_LSB, 0xFD);
 			//EEPROM_write(LOCATION_FILE_NUMBER_MSB, 0xFF);
+			return;
+		}
+		if(strcmp_P(command, PSTR("5")) == 0)
+		{
+			uart_puts_p(PSTR("Enter a new escape character: "));
+			setting_escape_character = uart_getc();
+			EEPROM_write(LOCATION_ESCAPE_CHAR, setting_escape_character);
 
+			uart_puts_p(PSTR("\nNew escape character: "));
+			uart_putdw_dec(setting_escape_character);
+			uart_puts_p(PSTR("\n"));
+			return;
+		}
+		if(strcmp_P(command, PSTR("6")) == 0)
+		{
+			char choice = 255;
+			while(choice > 9)
+			{
+				uart_puts_p(PSTR("Enter number of escape characters to look for: "));
+				choice = uart_getc() - '0';
+			}
+			
+			setting_max_escape_character = choice;
+			EEPROM_write(LOCATION_MAX_ESCAPE_CHAR, setting_max_escape_character);
+
+			uart_puts_p(PSTR("\nNumber of escape characters needed: "));
+			uart_putdw_dec(setting_max_escape_character);
+			uart_puts_p(PSTR("\n"));
 			return;
 		}
 		if(strcmp_P(command, PSTR("x")) == 0)
