@@ -189,6 +189,32 @@
 	Added an example Arduino sketch (from ScottH) to GitHub so that people can easily see how to send characters to
 	OpenLog. Not much to it, but it does allow us to test large amounts of text thrown at OpenLog
 	at 57600bps.
+	
+	
+	v1.6 Adding config file.
+	
+	What happens if I reset the system by pulling RX low, but the config file has corrupt values in it?
+	
+	If config file has corrupt values in it, system will default to known values 9600/ctrl+z/3/newlog
+	
+	If config file is empty, system resets to known values
+	
+	After some massive testing, and lots of code to check for illegal states, it looks to be pretty stable. 
+	The only problem is that we're running out of RAM. The buffer had to be decreased from 900 bytes 
+	to 700 bytes to facilitate all the config file checking. Testing at 57600bps, unit runs very well
+	over 40kb test file on straight RS232 connection. That's pretty good. Testing at 115200 on straight 
+	connection, unit will drop a buffer every once and a while. Not great, but not much we can do if the
+	SD card times out for ~150ms while it's writing.
+	8 bits to the byte plus a start/stop bit = 10 bits per byte
+	
+	@ 9600bps = 960 bytes per second. Buffer will last for 729ms
+	@ 57600bps = 5760 bytes per second. Buffer will last for 121ms
+	@ 115200bps = 11520 bytes per second. Buffer will last for 60.7ms
+	
+	So if the SD card pauses for more than 60ms, 115200 will have lost data, sometimes. All other baud rates
+	should be covered for the most part.
+	
+	SD cards with larges amounts of data will have increased pause rates. Always use a clean card where possible.
 
 */
 
@@ -381,6 +407,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <ctype.h>
+#include <stdlib.h>
 #include <avr/pgmspace.h>
 #include <avr/interrupt.h>
 #include <avr/sleep.h>
@@ -391,10 +418,12 @@
 #include "sd_raw.h"
 #include "sd_raw_config.h"
 
-#define BUFF_LEN 900
+#define BUFF_LEN 700
 volatile char input_buffer[BUFF_LEN];
 char general_buffer[25];
 volatile uint16_t read_spot, checked_spot;
+
+#define CFG_FILENAME	"CONFIG.txt"
 
 #include "uart.h"
 
@@ -417,10 +446,17 @@ void baud_menu(void);
 void system_menu(void);
 uint8_t read_buffer(char* buffer, uint8_t buffer_length);
 uint8_t append_file(char* file_name);
+
 void newlog(void);
 void seqlog(void);
 void command_shell(void);
+
 char check_emergency_reset(void);
+void set_default_settings(void);
+void read_system_settings(void);
+
+void read_config_file(void);
+void record_config_file(void);
 
 void blink_error(uint8_t ERROR_TYPE);
 
@@ -488,6 +524,8 @@ struct partition_struct* partition;
 struct fat_dir_struct* dd;
 static struct command_arg cmd_arg[MAX_COUNT_COMMAND_LINE_ARGS];
 
+char setting_uart_speed; //This is the baud rate that the system runs at, default is 9600
+char setting_system_mode; //This is the mode the system runs in, default is MODE_NEWLOG
 char setting_escape_character; //This is the ASCII character we look for to break logging, default is ctrl+z
 char setting_max_escape_character; //Number of escape chars before break logging, default is 3
 
@@ -505,21 +543,12 @@ int main(void)
 {
 	ioinit();
 
-	//Determine the system mode we should be in
-	uint8_t system_mode;
-	system_mode = EEPROM_read(LOCATION_SYSTEM_SETTING);
-	if(system_mode > 5) 
-	{
-		system_mode = MODE_NEWLOG; //By default, unit will turn on and go to new file logging
-		EEPROM_write(LOCATION_SYSTEM_SETTING, MODE_NEWLOG);
-	}
-
 	//If we are in new log mode, find a new file name to write to
-	if(system_mode == MODE_NEWLOG)
+	if(setting_system_mode == MODE_NEWLOG)
 		newlog();
 
 	//If we are in sequential log mode, determine if seqlog.txt has been created or not, and then open it for logging
-	if(system_mode == MODE_SEQLOG)
+	if(setting_system_mode == MODE_SEQLOG)
 		seqlog();
 
 	//Once either one of these modes exits, go to normal command mode, which is called by returning to main()
@@ -550,14 +579,11 @@ void ioinit(void)
 
 	if(check_emergency_reset()) //Look to see if the RX pin is being pulled low
 	{
-		//Reset UART to 9600bps
-		EEPROM_write(LOCATION_BAUD_SETTING, BAUD_9600);
+		set_default_settings(); //Reset baud, escape characters, escape number, system mode
 
-		//Reset escape character to ctrl+z
-		EEPROM_write(LOCATION_ESCAPE_CHAR, 26); 
-
-		//Reset number of escape characters to 3
-		EEPROM_write(LOCATION_MAX_ESCAPE_CHAR, 3);
+		init_media(); //Try to setup the SD card so we can record these new settings
+		
+		record_config_file(); //Record new config settings
 
 		//Now sit in forever loop indicating system is now at 9600bps
 		sbi(PORTD, STAT1); 
@@ -570,35 +596,10 @@ void ioinit(void)
 		}
 	}
 	
-	//Read what the current UART speed is from EEPROM memory
-	uint8_t uart_speed;
-	uart_speed = EEPROM_read(LOCATION_BAUD_SETTING);
-	if(uart_speed > 5) 
-	{
-		uart_speed = BAUD_9600; //Reset UART to 9600 if there is no speed stored
-		EEPROM_write(LOCATION_BAUD_SETTING, BAUD_9600);
-	}
-
-	//Read the escape_character
-	//ASCII(26) is ctrl+z
-	setting_escape_character = EEPROM_read(LOCATION_ESCAPE_CHAR);
-	if(setting_escape_character == 255) 
-	{
-		setting_escape_character = 26; //Reset escape character to ctrl+z
-		EEPROM_write(LOCATION_ESCAPE_CHAR, setting_escape_character);
-	}
-
-	//Read the number of escape_characters to look for
-	//Default is 3
-	setting_max_escape_character = EEPROM_read(LOCATION_MAX_ESCAPE_CHAR);
-	if(setting_max_escape_character == 255) 
-	{
-		setting_max_escape_character = 3; //Reset number of escape characters to 3
-		EEPROM_write(LOCATION_MAX_ESCAPE_CHAR, setting_max_escape_character);
-	}
+	read_system_settings(); //Read the system settings into some global variables
 
     //Setup uart
-    uart_init(uart_speed);
+    uart_init(setting_uart_speed);
 #if DEBUG
 	uart_puts_p(PSTR("UART Init\n"));
 #else
@@ -608,6 +609,361 @@ void ioinit(void)
 	//Setup SPI, init SD card, etc
 	init_media();
 	uart_puts_p(PSTR("2"));
+	
+	read_config_file(); //Read the system settings from the config file	
+}
+
+void read_config_file(void)
+{
+	char config_file_name[13];
+	sprintf(config_file_name, CFG_FILENAME); //This is the name of the config file. 'config.sys' is probably a bad idea.
+
+	struct fat_dir_entry_struct file_entry;
+
+	//Check to see if we have a config file
+	if(find_file_in_dir(fs, dd, config_file_name, &file_entry, 0))
+	{
+		//If we found the config file then load settings from file and push them into EEPROM
+		#if DEBUG
+			uart_puts("\n\nFound config file!");
+		#endif
+		
+		//Now load settings from file
+		
+		//search file in current directory and open it
+		struct fat_file_struct* fd = open_file_in_dir(fs, dd, config_file_name);
+		if(!fd)
+		{
+			uart_puts_p(PSTR("error opening config file"));
+			return;
+		}
+
+		//int32_t offset = 0;
+		//Seeks the end of the file : offset = EOF location
+		/*if(!fat_seek_file(fd, &offset, FAT_SEEK_END))
+		{
+			uart_puts_p(PSTR("error seeking config file"));
+			fat_close_file(fd);
+			return;
+		}*/
+
+		/*char mytemp[30];
+		sprintf(mytemp, "\noffset: %d\n", offset);
+		uart_puts(mytemp);*/
+
+
+		//Read line from file
+		uint8_t settings_string[16]; //"115200,103,14,0\0" = 115200 bps, escape char of ASCII(103), 14 times, new log mode
+		uint8_t len;
+		len = fat_read_file(fd, settings_string, sizeof(settings_string)); //Read first line of file
+
+		fat_close_file(fd);
+
+		//Print line for debugging
+		#if DEBUG
+			if(len > 0)
+			{
+				uart_putc('\n');
+				for(uint8_t i = 0; i < len; ++i)
+					uart_putc(settings_string[i]);
+			}
+		#endif
+		
+		//Default the system settings in case things go horribly wrong
+		char new_system_baud = BAUD_9600;
+		char new_system_mode = MODE_NEWLOG;
+		char new_system_escape = 26;
+		char new_system_max_escape = 3;
+
+		//Parse the settings out
+		uint8_t i = 0, j = 0, setting_number = 0;
+		char new_setting[7]; //Max length of a setting is 6, the bps setting = '115200' plus '\0'
+		for(i = 0 ; i < len; i++)
+		{
+			//Pick out one setting from the line of text
+			for(j = 0 ; settings_string[i] != ',' && i < len && j < 6 ; )
+			{
+				new_setting[j] = settings_string[i];
+				i++;
+				j++;
+			}
+			
+			new_setting[j] = '\0'; //Terminate the string for array compare
+			
+			if(setting_number == 0) //Baud rate
+			{
+				if( strcmp(new_setting, "2400") == 0) new_system_baud = BAUD_2400;
+				else if( strcmp(new_setting, "4800") == 0) new_system_baud = BAUD_4800;
+				else if( strcmp(new_setting, "9600") == 0) new_system_baud = BAUD_9600;
+				else if( strcmp(new_setting, "19200") == 0) new_system_baud = BAUD_19200;
+				else if( strcmp(new_setting, "57600") == 0) new_system_baud = BAUD_57600;
+				else if( strcmp(new_setting, "115200") == 0) new_system_baud = BAUD_115200;
+				else new_system_baud = BAUD_9600; //Default is 9600bps
+			}
+			else if(setting_number == 1) //Escape character
+			{
+				new_system_escape = atoi(new_setting);
+				if(new_system_escape == 0 || new_system_escape > 127) new_system_escape = 26; //Default is ctrl+z
+			}
+			else if(setting_number == 2) //Max amount escape character
+			{
+				new_system_max_escape = atoi(new_setting);
+				if(new_system_max_escape == 0 || new_system_max_escape > 10) new_system_max_escape = 3; //Default is 3
+			}
+			else if(setting_number == 3) //System mode
+			{
+				new_system_mode = atoi(new_setting);
+				if(new_system_mode == 0 || new_system_mode > 5) new_system_mode = MODE_NEWLOG; //Default is NEWLOG
+			}
+			else
+				//We're done! Stop looking for settings
+				break;
+			
+			setting_number++;
+		}
+
+		//This will print the found settings. Use for debugging
+		/*
+		uart_puts_p(PSTR("\nSettings found: "));
+
+		char temp_string[16]; //"115200,103,14,0\0" = 115200 bps, escape char of ASCII(103), 14 times, new log mode
+		char temp[3];
+
+		if(system_baud == BAUD_2400) strcpy(temp_string, "2400");
+		if(system_baud == BAUD_4800) strcpy(temp_string, "4800");
+		if(system_baud == BAUD_9600) strcpy(temp_string, "9600");
+		if(system_baud == BAUD_19200) strcpy(temp_string, "19200");
+		if(system_baud == BAUD_57600) strcpy(temp_string, "57600");
+		if(system_baud == BAUD_115200) strcpy(temp_string, "115200");
+		
+		strcat(temp_string, ",");
+		
+		//Convert escape character to an ASCII visible string
+		sprintf(temp, "%d", system_escape);
+		strcat(temp_string, temp); //Add this string to the system string
+
+		strcat(temp_string, ",");
+
+		//Convert max escape character to an ASCII visible string
+		sprintf(temp, "%d", system_max_escape);
+		strcat(temp_string, temp); //Add this string to the system string
+
+		strcat(temp_string, ",");
+
+		//Convert system mode to a ASCII visible character
+		sprintf(temp, "%d", system_mode);
+		strcat(temp_string, temp); //Add this string to the system string
+
+		strcat(temp_string, "\0");
+		
+		uart_puts(temp_string);
+
+		uart_puts_p(PSTR("\n"));
+		*/
+		
+		//We now have the settings loaded into the global variables. Now check if they're different from EEPROM settings
+
+		if(new_system_baud != setting_uart_speed)
+		{
+			//If the baud rate from the file is different from the current setting,
+			//Then update the setting to the file setting
+			//And re-init the UART
+			EEPROM_write(LOCATION_BAUD_SETTING, new_system_baud);
+			setting_uart_speed = new_system_baud;
+		    uart_init(setting_uart_speed);
+		}
+
+		if(new_system_mode != setting_system_mode)
+		{
+			//Goto new system mode
+			setting_system_mode = new_system_mode;
+			EEPROM_write(LOCATION_SYSTEM_SETTING, setting_system_mode);
+		}
+		
+		if(new_system_escape != setting_escape_character)
+		{
+			//Goto new system escape char
+			setting_escape_character = new_system_escape;
+			EEPROM_write(LOCATION_ESCAPE_CHAR, setting_escape_character); 
+		}
+		
+		if(new_system_max_escape != setting_max_escape_character)
+		{
+			//Goto new max escape
+			setting_max_escape_character = new_system_max_escape;
+			EEPROM_write(LOCATION_MAX_ESCAPE_CHAR, setting_max_escape_character);
+		}
+		
+		record_config_file(); //If we corrected some values because the config file was corrupt, then overwrite any corruption
+	
+		//All done! New settings are loaded. System will now operate off new config settings found in file.
+	}
+	else
+	{
+		//If we don't have a config file already, then create config file and record the current system settings to the file
+		#if DEBUG
+			uart_puts("No config found - creating default:\n");
+		#endif
+
+		//Record the current eeprom settings to the config file
+		record_config_file();
+	}
+	
+}
+
+//Records the current EEPROM settings to the config file
+//If a config file exists, it is trashed and a new one is created
+void record_config_file(void)
+{
+	struct fat_dir_entry_struct file_entry;
+
+	char config_file_name[13];
+	sprintf(config_file_name, CFG_FILENAME); //This is the name of the config file. 'config.sys' is probably a bad idea.
+
+	//If there is currently a config file, trash it
+	if(find_file_in_dir(fs, dd, config_file_name, &file_entry, 0))
+	{
+		#if DEBUG
+			uart_puts("\n\nDeleting config\n");
+		#endif
+		
+		fat_delete_file(fs, &file_entry);
+	}
+
+	//Create config file
+	if(fat_create_file(dd, config_file_name, &file_entry) == 0)
+	{
+		uart_puts("Failed to create config file");
+		return;
+	}
+	else
+	{
+		//Config was successfully created, so let's fill it with default settings
+
+		struct fat_file_struct* fd = open_file_in_dir(fs, dd, config_file_name);
+		if(!fd)
+		{
+			uart_puts("!error opening config file\n");
+			return;
+		}
+
+		//Read current system settings to the config file
+
+		//Baud, escape character, escape times, system mode (0 = new log)
+		char settings_string[16]; //"115200,103,14,0\0" = 115200 bps, escape char of ASCII(103), 14 times, new log mode
+		char temp[3];
+
+		//Before we read the EEPROM values, they've already been tested and defaulted in the read_system_settings function
+		char current_system_baud = EEPROM_read(LOCATION_BAUD_SETTING);
+		char current_system_mode = EEPROM_read(LOCATION_SYSTEM_SETTING);
+		char current_system_escape = EEPROM_read(LOCATION_ESCAPE_CHAR);
+		char current_system_max_escape = EEPROM_read(LOCATION_MAX_ESCAPE_CHAR);
+		
+		if(current_system_baud == BAUD_2400) strcpy(settings_string,"2400");
+		if(current_system_baud == BAUD_4800) strcpy(settings_string,"4800");
+		if(current_system_baud == BAUD_9600) strcpy(settings_string,"9600");
+		if(current_system_baud == BAUD_19200) strcpy(settings_string,"19200");
+		if(current_system_baud == BAUD_57600) strcpy(settings_string,"57600");
+		if(current_system_baud == BAUD_115200) strcpy(settings_string,"115200");
+		
+		strcat(settings_string, ",");
+		
+		//Convert escape character to an ASCII visible string
+		sprintf(temp, "%d", current_system_escape);
+		strcat(settings_string, temp); //Add this string to the system string
+
+		strcat(settings_string, ",");
+
+		//Convert max escape character to an ASCII visible string
+		sprintf(temp, "%d", current_system_max_escape);
+		strcat(settings_string, temp); //Add this string to the system string
+
+		strcat(settings_string, ",");
+
+		//Convert system mode to a ASCII visible character
+		sprintf(temp, "%d", current_system_mode);
+		strcat(settings_string, temp); //Add this string to the system string
+
+		strcat(settings_string, "\0");
+
+		//Record current system settings to the config file
+		//strcpy( (char*)input_buffer, "9600,26,3,0\0");
+		strcpy( (char*)input_buffer, settings_string);
+
+		#if DEBUG
+			uart_puts_p(PSTR("\nSetting string: "));
+			uart_puts(settings_string);
+		#endif
+
+		if( fat_write_file(fd, (uint8_t*)input_buffer, strlen(settings_string) ) != strlen(settings_string) )
+			uart_puts("error writing to config\n");
+
+		fat_close_file(fd);
+
+		sd_raw_sync(); //Sync all newly written data to card
+		
+		//Now the new config file has the current system settings, nothing else to do!
+	}
+}
+
+//Resets all the system settings to safe values
+void set_default_settings(void)
+{
+	//Reset UART to 9600bps
+	EEPROM_write(LOCATION_BAUD_SETTING, BAUD_9600);
+
+	//Reset system to new log mode
+	EEPROM_write(LOCATION_SYSTEM_SETTING, MODE_NEWLOG);
+
+	//Reset escape character to ctrl+z
+	EEPROM_write(LOCATION_ESCAPE_CHAR, 26); 
+
+	//Reset number of escape characters to 3
+	EEPROM_write(LOCATION_MAX_ESCAPE_CHAR, 3);
+
+	//These settings are not recorded to the config file
+	//We can't do it here because we are not sure the FAT system is init'd
+}
+
+//Reads the current system settings from EEPROM
+//If anything looks weird, reset setting to default value
+void read_system_settings(void)
+{
+	//Read what the current UART speed is from EEPROM memory
+	//Default is 9600
+	setting_uart_speed = EEPROM_read(LOCATION_BAUD_SETTING);
+	if(setting_uart_speed > 10) 
+	{
+		setting_uart_speed = BAUD_9600; //Reset UART to 9600 if there is no speed stored
+		EEPROM_write(LOCATION_BAUD_SETTING, setting_uart_speed);
+	}
+
+	//Determine the system mode we should be in
+	//Default is NEWLOG mode
+	setting_system_mode = EEPROM_read(LOCATION_SYSTEM_SETTING);
+	if(setting_system_mode > 5) 
+	{
+		setting_system_mode = MODE_NEWLOG; //By default, unit will turn on and go to new file logging
+		EEPROM_write(LOCATION_SYSTEM_SETTING, setting_system_mode);
+	}
+
+	//Read the escape_character
+	//ASCII(26) is ctrl+z
+	setting_escape_character = EEPROM_read(LOCATION_ESCAPE_CHAR);
+	if(setting_escape_character == 0 || setting_escape_character == 255) 
+	{
+		setting_escape_character = 26; //Reset escape character to ctrl+z
+		EEPROM_write(LOCATION_ESCAPE_CHAR, setting_escape_character);
+	}
+
+	//Read the number of escape_characters to look for
+	//Default is 3
+	setting_max_escape_character = EEPROM_read(LOCATION_MAX_ESCAPE_CHAR);
+	if(setting_max_escape_character == 0 || setting_max_escape_character == 255) 
+	{
+		setting_max_escape_character = 3; //Reset number of escape characters to 3
+		EEPROM_write(LOCATION_MAX_ESCAPE_CHAR, setting_max_escape_character);
+	}
 }
 
 //Check to see if we need an emergency UART reset
@@ -810,10 +1166,7 @@ void create_lots_of_files(void)
 		uart_puts_p(PSTR("\nF:"));
 		uart_puts(new_file_name);
 		uart_puts_p(PSTR("\n"));
-
-
 	}
-
 }
 #endif
 
@@ -1784,6 +2137,7 @@ void baud_menu(void)
 
 			//Set baud rate to 2400
 			EEPROM_write(LOCATION_BAUD_SETTING, BAUD_2400);
+			record_config_file(); //Put this new setting into the config file
 			blink_error(ERROR_NEW_BAUD);
 			return;
 		}
@@ -1793,6 +2147,7 @@ void baud_menu(void)
 
 			//Set baud rate to 4800
 			EEPROM_write(LOCATION_BAUD_SETTING, BAUD_4800);
+			record_config_file(); //Put this new setting into the config file
 			blink_error(ERROR_NEW_BAUD);
 			return;
 		}
@@ -1802,6 +2157,7 @@ void baud_menu(void)
 
 			//Set baud rate to 9600
 			EEPROM_write(LOCATION_BAUD_SETTING, BAUD_9600);
+			record_config_file(); //Put this new setting into the config file
 			blink_error(ERROR_NEW_BAUD);
 			return;
 		}
@@ -1811,6 +2167,7 @@ void baud_menu(void)
 
 			//Set baud rate to 19200
 			EEPROM_write(LOCATION_BAUD_SETTING, BAUD_19200);
+			record_config_file(); //Put this new setting into the config file
 			blink_error(ERROR_NEW_BAUD);
 			return;
 		}
@@ -1820,6 +2177,7 @@ void baud_menu(void)
 
 			//Set baud rate to 57600
 			EEPROM_write(LOCATION_BAUD_SETTING, BAUD_57600);
+			record_config_file(); //Put this new setting into the config file
 			blink_error(ERROR_NEW_BAUD);
 			return;
 		}
@@ -1829,6 +2187,7 @@ void baud_menu(void)
 
 			//Set baud rate to 115200
 			EEPROM_write(LOCATION_BAUD_SETTING, BAUD_115200);
+			record_config_file(); //Put this new setting into the config file
 			blink_error(ERROR_NEW_BAUD);
 			return;
 		}
@@ -1891,18 +2250,21 @@ void system_menu(void)
 		{
 			uart_puts_p(PSTR("New file logging\n"));
 			EEPROM_write(LOCATION_SYSTEM_SETTING, MODE_NEWLOG);
+			record_config_file(); //Put this new setting into the config file
 			return;
 		}
 		if(strcmp_P(command, PSTR("2")) == 0)
 		{
 			uart_puts_p(PSTR("Append file logging\n"));
 			EEPROM_write(LOCATION_SYSTEM_SETTING, MODE_SEQLOG);
+			record_config_file(); //Put this new setting into the config file
 			return;
 		}
 		if(strcmp_P(command, PSTR("3")) == 0)
 		{
 			uart_puts_p(PSTR("Command prompt\n"));
 			EEPROM_write(LOCATION_SYSTEM_SETTING, MODE_COMMAND);
+			record_config_file(); //Put this new setting into the config file
 			return;
 		}
 		if(strcmp_P(command, PSTR("4")) == 0)
@@ -1921,6 +2283,7 @@ void system_menu(void)
 			uart_puts_p(PSTR("Enter a new escape character: "));
 			setting_escape_character = uart_getc();
 			EEPROM_write(LOCATION_ESCAPE_CHAR, setting_escape_character);
+			record_config_file(); //Put this new setting into the config file
 
 			uart_puts_p(PSTR("\nNew escape character: "));
 			uart_putdw_dec(setting_escape_character);
@@ -1938,6 +2301,7 @@ void system_menu(void)
 			
 			setting_max_escape_character = choice;
 			EEPROM_write(LOCATION_MAX_ESCAPE_CHAR, setting_max_escape_character);
+			record_config_file(); //Put this new setting into the config file
 
 			uart_puts_p(PSTR("\nNumber of escape characters needed: "));
 			uart_putdw_dec(setting_max_escape_character);
