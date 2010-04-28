@@ -216,6 +216,17 @@
 	
 	SD cards with larges amounts of data will have increased pause rates. Always use a clean card where possible.
 
+
+	v1.61 Small PCB change. Fixed version # in help menu.
+
+	Fixed the firmware version in the help menu to v1.61.
+
+	Updated Eagle files to Eagle v5.9. Fixed weird airwire. Changed D1 LED from Green to Blue. 
+	Will only affect new production after 4-28-10.
+	
+	Closed some tickets and wrote some more example Arduino code:
+	http://forum.sparkfun.com/viewtopic.php?t=21438
+
 */
 
 /**
@@ -2070,7 +2081,7 @@ uint8_t print_disk_info(const struct fat_fs_struct* fs)
 
 void print_menu(void)
 {
-	uart_puts_p(PSTR("\nOpenLog v1.51\n"));
+	uart_puts_p(PSTR("\nOpenLog v1.61\n"));
 	uart_puts_p(PSTR("Available commands:\n"));
 	uart_puts_p(PSTR("new <file>\t\t: Creates <file>\n"));
 	uart_puts_p(PSTR("append <file>\t\t: Appends text to end of <file>. The text is read from the UART in a stream and is not echoed. Finish by sending Ctrl+z (ASCII 26)\n"));
