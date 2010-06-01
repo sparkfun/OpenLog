@@ -518,6 +518,15 @@ struct command_arg
 #define MODE_COMMAND 2
 #define MAX_COUNT_COMMAND_LINE_ARGS 4
 
+#define INCLUDE_SIMPLE_EMBEDDED
+#define ECHO				0x01
+#define EXTENDED_INFO		0x02
+#define READABLE_TEXT_ONLY	0x04
+
+#ifdef INCLUDE_SIMPLE_EMBEDDED
+	#define EMBEDDED_END_MARKER	0x08
+#endif
+
 //Global variables
 struct fat_fs_struct* fs;
 struct partition_struct* partition;
@@ -528,6 +537,8 @@ char setting_uart_speed; //This is the baud rate that the system runs at, defaul
 char setting_system_mode; //This is the mode the system runs in, default is MODE_NEWLOG
 char setting_escape_character; //This is the ASCII character we look for to break logging, default is ctrl+z
 char setting_max_escape_character; //Number of escape chars before break logging, default is 3
+
+uint8_t feedback_mode = (ECHO | EXTENDED_INFO | READABLE_TEXT_ONLY);
 
 //Circular buffer UART RX interrupt
 //Is only used during append
@@ -1061,7 +1072,7 @@ void newlog(void)
 
 		return; //Bail!
 	}
-	
+
 	//If we made it this far, everything looks good - let's create the new LOG and write to it
 
 	char* new_file_name = general_buffer;
@@ -1177,23 +1188,43 @@ void command_shell(void)
 	char buffer[24];
 	uint8_t tmp_var;
 
+#ifdef INCLUDE_SIMPLE_EMBEDDED
+	uint32_t file_index;
+	uint8_t command_succedded = 1;
+#endif //INCLUDE_SIMPLE_EMBEDDED
+
 	while(1)
 	{
+#ifdef INCLUDE_SIMPLE_EMBEDDED
+		if ((feedback_mode & EMBEDDED_END_MARKER) > 0)
+			uart_putc((char)0x1A); // Ctrl+Z ends the data and marks the start of result
+		if (command_succedded == 0)
+			uart_putc('!');
+#endif
 		//print prompt
-		uart_putc('>');
+		uart_puts_p(PSTR("\n>"));
 
 		//read command
 		char* command = buffer;
 		if(read_line(command, sizeof(buffer)) < 1)
+		{
+#ifdef INCLUDE_SIMPLE_EMBEDDED
+			command_succedded = 1;
+#endif
 			continue;
+		}
 
+#ifdef INCLUDE_SIMPLE_EMBEDDED
+		command_succedded = 0;
+#endif
 		//Argument 1: The actual command
 		char* command_arg = get_cmd_arg(0);
 
 		//execute command
 		if(strcmp_P(command_arg, PSTR("init")) == 0)
 		{
-			uart_puts_p(PSTR("Closing down file system\n"));
+			if ((feedback_mode & EXTENDED_INFO) > 0)
+				uart_puts_p(PSTR("Closing down file system\n"));
 
 			/* close file system */
 			fat_close(fs);
@@ -1204,27 +1235,43 @@ void command_shell(void)
 			//Setup SPI, init SD card, etc
 			init_media();
 
-			uart_puts_p(PSTR("File system initialized\n"));
+			if ((feedback_mode & EXTENDED_INFO) > 0)
+				uart_puts_p(PSTR("File system initialized\n"));
+#ifdef INCLUDE_SIMPLE_EMBEDDED
+			command_succedded = 1;
+#endif
 		}
 		else if(strcmp_P(command_arg, PSTR("?")) == 0)
 		{
 			//Print available commands
 			print_menu();
+#ifdef INCLUDE_SIMPLE_EMBEDDED
+			command_succedded = 1;
+#endif
 		}
 		else if(strcmp_P(command_arg, PSTR("help")) == 0)
 		{
 			//Print available commands
 			print_menu();
+#ifdef INCLUDE_SIMPLE_EMBEDDED
+			command_succedded = 1;
+#endif
 		}
 		else if(strcmp_P(command_arg, PSTR("baud")) == 0)
 		{
 			//Go into baud select menu
 			baud_menu();
+#ifdef INCLUDE_SIMPLE_EMBEDDED
+			command_succedded = 1;
+#endif
 		}
 		else if(strcmp_P(command_arg, PSTR("set")) == 0)
 		{
 			//Go into system setting menu
 			system_menu();
+#ifdef INCLUDE_SIMPLE_EMBEDDED
+			command_succedded = 1;
+#endif
 		}
 		#if DEBUG
 		else if(strcmp_P(command_arg, PSTR("create")) == 0)
@@ -1253,20 +1300,29 @@ void command_shell(void)
 				{
 					fat_close_dir(dd);
 					dd = dd_new;
+#ifdef INCLUDE_SIMPLE_EMBEDDED
+					command_succedded = 1;
+#endif
 					continue;
 				}
 			}
 
-			uart_puts_p(PSTR("directory not found: "));
-			uart_puts(command_arg);
-			uart_putc('\n');
+			if ((feedback_mode & EXTENDED_INFO) > 0)
+			{
+				uart_puts_p(PSTR("directory not found: "));
+				uart_puts(command_arg);
+			}
 		}
 		else if(strcmp_P(command_arg, PSTR("ls")) == 0)
 		{
 			//Argument 2: wild card search
 			command_arg = get_cmd_arg(1);
 
-			/* print directory listing */
+			//Reset FAT
+			fat_reset_dir(dd);
+			uint8_t append_lf = 0;
+
+			// print directory listing
 			struct fat_dir_entry_struct dir_entry;
 			while(fat_read_dir(dd, &dir_entry))
 			{
@@ -1275,6 +1331,12 @@ void command_shell(void)
 				if(command_arg != 0)
 					if (wildcmp(command_arg, dir_entry.long_name))
 						tmp_var = 1;
+
+				if (append_lf == 1)
+				{
+					uart_putc('\n');
+					append_lf = 0;
+				}
 
 				//If no arguments list all files, otherwise we only list the files
 				//being matched by the wildcard search
@@ -1287,9 +1349,12 @@ void command_shell(void)
 					while(spaces--)
 						uart_putc(' ');
 					uart_putdw_dec(dir_entry.file_size);
-					uart_putc('\n');
+					append_lf = 1;
 				}
 			}
+#ifdef INCLUDE_SIMPLE_EMBEDDED
+			command_succedded = 1;
+#endif
 		}
 		else if(strncmp_P(command_arg, PSTR("cat"), 3) == 0)
 		{
@@ -1302,12 +1367,18 @@ void command_shell(void)
 			if(command_arg == 0)
 				continue;
 
-			/* search file in current directory and open it */
+			// search file in current directory and open it
 			struct fat_file_struct* fd = open_file_in_dir(fs, dd, command_arg);
 			if(!fd)
 			{
-				uart_puts_p(PSTR("error opening "));
-				uart_puts(command_arg);
+				if ((feedback_mode & EXTENDED_INFO) > 0)
+				{
+					uart_puts_p(PSTR("error opening "));
+					uart_puts(command_arg);
+				}
+				else
+					uart_puts_p(PSTR("!"));
+
 				uart_putc('\n');
 				continue;
 			}
@@ -1316,8 +1387,14 @@ void command_shell(void)
 			uint8_t buffer[8];
 			uint32_t offset = 0;
 			uint8_t len;
+			tmp_var = 0;
 			while((len = fat_read_file(fd, buffer, sizeof(buffer))) > 0)
 			{
+				if (tmp_var == 1)
+				{
+					uart_putc('\n');
+					tmp_var = 0;
+				}
 				uart_putdw_hex(offset);
 				uart_putc(':');
 				for(uint8_t i = 0; i < len; ++i)
@@ -1325,11 +1402,14 @@ void command_shell(void)
 					uart_putc(' ');
 					uart_putc_hex(buffer[i]);
 				}
-				uart_putc('\n');
+				tmp_var = 1;
 				offset += 8;
 			}
 
 			fat_close_file(fd);
+#ifdef INCLUDE_SIMPLE_EMBEDDED
+			command_succedded = 1;
+#endif
 		}
 		else if(strncmp_P(command_arg, PSTR("read"), 4) == 0)
 		{
@@ -1338,13 +1418,15 @@ void command_shell(void)
 			if(command_arg == 0)
 				continue;
 
-			/* search file in current directory and open it */
+			// search file in current directory and open it
 			struct fat_file_struct* fd = open_file_in_dir(fs, dd, command_arg);
 			if(!fd)
 			{
-				uart_puts_p(PSTR("error opening "));
-				uart_puts(command_arg);
-				uart_putc('\n');
+				if ((feedback_mode & EXTENDED_INFO) > 0)
+				{
+					uart_puts_p(PSTR("error opening "));
+					uart_puts(command_arg);
+				}
 				continue;
 			}
 
@@ -1356,10 +1438,11 @@ void command_shell(void)
 					int32_t offset = strtolong(command_arg);
 					if(!fat_seek_file(fd, &offset, FAT_SEEK_SET))
 					{
-						uart_puts_p(PSTR("error seeking on "));
-						uart_puts(command);
-						uart_putc('\n');
-
+						if ((feedback_mode & EXTENDED_INFO) > 0)
+						{
+							uart_puts_p(PSTR("error seeking on "));
+							uart_puts(command);
+						}
 						fat_close_file(fd);
 						continue;
 					}
@@ -1372,26 +1455,55 @@ void command_shell(void)
 				if ((command_arg = is_number(command_arg, strlen(command_arg))) != 0)
 					chunk_to_read = strtolong(command_arg);
 
+			uint32_t index_raw_data = 0;
+			memset((char*)input_buffer, '\0', sizeof(input_buffer));
+
 			/* print file contents */
 			uint8_t buffer;
 			while((fat_read_file(fd, &buffer, 1) > 0) && (chunk_to_read > 0))
 			{
-				if( buffer >= ' ' && buffer < 127 )
-					uart_putc(buffer);
-				else if (buffer == '\n' )
-					uart_putc(buffer);
-				else
-					uart_putc('.');
+				// If we are to send non-readable data (also "binary") as "."
+				if ((feedback_mode & READABLE_TEXT_ONLY) > 0)
+					if((buffer >= 127) || (buffer < 32))
+						if ((buffer != 10) && (buffer != 13)) // NL line feed , new line and carriage return
+							buffer = '.';
+
+				// Collect the data
+				input_buffer[index_raw_data++] = buffer;
+				if (index_raw_data >= (BUFF_LEN - 1))
+				{
+					uart_puts((char*)input_buffer);
+					index_raw_data = 0;
+					memset((char*)input_buffer, '\0', sizeof(input_buffer));
+				}
 
 				chunk_to_read--;
 			}
-			uart_putc('\n');
+
+				// Send the data that is left to the client
+			if (index_raw_data > 0)
+			{
+				uart_puts((char*)input_buffer);
+				memset((char*)input_buffer, '\0', sizeof(input_buffer));
+			}
 			fat_close_file(fd);
+#ifdef INCLUDE_SIMPLE_EMBEDDED
+			command_succedded = 1;
+#endif
 		}
 		else if(strcmp_P(command_arg, PSTR("disk")) == 0)
 		{
 			if(!print_disk_info(fs))
-				uart_puts_p(PSTR("error reading disk info\n"));
+			{
+				if ((feedback_mode & EXTENDED_INFO) > 0)
+					uart_puts_p(PSTR("error reading disk info\n"));
+			}
+#ifdef INCLUDE_SIMPLE_EMBEDDED
+			else
+			{
+				command_succedded = 1;
+			}
+#endif
 		}
 		else if(strncmp_P(command_arg, PSTR("size"), 4) == 0)
 		{
@@ -1408,10 +1520,10 @@ void command_shell(void)
 			if(find_file_in_dir(fs, dd, command_arg, &file_entry, 0))
 			{
 				uart_putdw_dec(file_entry.file_size);
-				uart_putc('\n');
+#ifdef INCLUDE_SIMPLE_EMBEDDED
+				command_succedded = 1;
+#endif
 			}
-            else
-				uart_puts("-1\n");
 		}
 #if FAT_WRITE_SUPPORT
 		else if(strncmp_P(command_arg, PSTR("rm"), 2) == 0)
@@ -1431,12 +1543,19 @@ void command_shell(void)
 				if(!fat_delete_file(fs, &file_entry))
 				{
 					//Some kind of error, but continue anyway
-					uart_puts_p(PSTR("error deleting file: "));
-					uart_puts(command);
-					uart_putc('\n');
+					if ((feedback_mode & EXTENDED_INFO) > 0)
+					{
+						uart_puts_p(PSTR("error deleting file: "));
+						uart_puts(command);
+					}
 				}
+#ifdef INCLUDE_SIMPLE_EMBEDDED
+				else
+				{
+					command_succedded = 1;
+				}
+#endif
 			}
-
 		}
 		else if(strncmp_P(command_arg, PSTR("new"), 3) == 0)
 		{
@@ -1449,16 +1568,29 @@ void command_shell(void)
 			if(command_arg == 0)
 				continue;
 
+			//Reset FAT
+			fat_reset_dir(dd);
+
 			struct fat_dir_entry_struct file_entry;
 			if(!fat_create_file(dd, command_arg, &file_entry))
 			{
-				uart_puts_p(PSTR("error creating file: "));
-				uart_puts(command);
-				uart_putc('\n');
+				if ((feedback_mode & EXTENDED_INFO) > 0)
+				{
+					uart_puts_p(PSTR("error creating file: "));
+					uart_puts(command);
+				}
 			}
+#ifdef INCLUDE_SIMPLE_EMBEDDED
+			else
+			{
+				command_succedded = 1;
+			}
+#endif
 		}
 		else if(strncmp_P(command_arg, PSTR("write"), 5) == 0)
 		{
+			int32_t offset = 0;
+
 			//Argument 2: File name
 			command_arg = get_cmd_arg(1);
 			if(command_arg == 0)
@@ -1467,28 +1599,35 @@ void command_shell(void)
 			//Argument 3: Offset value - do not continue if the value is not correct
 			char* offset_buffer;
 			if ((offset_buffer = get_cmd_arg(2)) != 0)
+			{
 				if ((offset_buffer = is_number(offset_buffer, strlen(offset_buffer))) == 0)
 					continue;
+				else
+					offset = strtolong(offset_buffer);
+			}
 
-
-			/* search file in current directory and open it */
+			// search file in current directory and open it
+			command_arg = get_cmd_arg(1);
 			struct fat_file_struct* fd = open_file_in_dir(fs, dd, command_arg);
 			if(!fd)
 			{
-				uart_puts_p(PSTR("error opening "));
-				uart_puts(command_arg);
-				uart_putc('\n');
+				if ((feedback_mode & EXTENDED_INFO) > 0)
+				{
+					uart_puts_p(PSTR("!error opening "));
+					uart_puts(command_arg);
+				}
 				continue;
 			}
 
+			uart_putc('\n');
 			//Seek file position
-			int32_t offset = strtolong(offset_buffer);
 			if(!fat_seek_file(fd, &offset, FAT_SEEK_SET))
 			{
-				uart_puts_p(PSTR("error seeking on "));
-				uart_puts(command_arg);
-				uart_putc('\n');
-
+				if ((feedback_mode & EXTENDED_INFO) > 0)
+				{
+					uart_puts_p(PSTR("!error seeking on "));
+					uart_puts(command_arg);
+				}
 				fat_close_file(fd);
 				continue;
 			}
@@ -1497,23 +1636,30 @@ void command_shell(void)
 			uint8_t data_len;
 			while(1)
 			{
-				/* give a different prompt */
+#ifdef INCLUDE_SIMPLE_EMBEDDED
+			if ((feedback_mode & EMBEDDED_END_MARKER) > 0)
+				uart_putc((char)0x1A); // Ctrl+Z ends the data and marks the start of result
+#endif
+				//give a different prompt
 				uart_putc('<');
-				//uart_putc(' ');
 
-				/* read one line of text */
+				//read one line of text
 				data_len = read_line(buffer, sizeof(buffer));
 				if(!data_len)
+				{
+#ifdef INCLUDE_SIMPLE_EMBEDDED
+					command_succedded = 1;
+#endif
 					break;
-
-				/* write text to file */
+				}
+				//write text to file
 				if(fat_write_file(fd, (uint8_t*) buffer, data_len) != data_len)
 				{
-					uart_puts_p(PSTR("error writing to file\n"));
+					if ((feedback_mode & EXTENDED_INFO) > 0)
+						uart_puts_p(PSTR("!error writing to file"));
 					break;
 				}
 			}
-
 			fat_close_file(fd);
 		}
 
@@ -1529,8 +1675,13 @@ void command_shell(void)
 			command_arg = get_cmd_arg(1);
 			if(command_arg == 0)
 				continue;
-				
-			append_file(command_arg); //Uses circular buffer to capture full stream of text and append to file
+
+			//"append_file(...)" uses circular buffer to capture full stream of text and append to file;
+#ifdef INCLUDE_SIMPLE_EMBEDDED
+		command_succedded = append_file(command_arg);
+#else
+		append_file(command_arg);
+#endif
 		}
 		else if(strncmp_P(command_arg, PSTR("md"), 2) == 0)
 		{
@@ -1542,24 +1693,196 @@ void command_shell(void)
 			struct fat_dir_entry_struct dir_entry;
 			if(!fat_create_dir(dd, command_arg, &dir_entry))
 			{
-				uart_puts_p(PSTR("error creating directory: "));
-				uart_puts(command_arg);
-				uart_putc('\n');
+				if ((feedback_mode & EXTENDED_INFO) > 0)
+				{
+					uart_puts_p(PSTR("!error creating directory: "));
+					uart_puts(command_arg);
+				}
+			}
+#ifdef INCLUDE_SIMPLE_EMBEDDED
+			else
+			{
+				command_succedded = 1;
+			}
+#endif
+		}
+		// binary <on>|<off>
+		else if(strcmp_P(command_arg, PSTR("binary")) == 0)
+		{
+			//Argument 2: <on>|<off>
+			// Set if we are going to send binary characters as "." back to client or not
+			command_arg = get_cmd_arg(1);
+			if (command_arg != 0)
+			{
+				if ((tmp_var = strcmp_P(command_arg, PSTR("on"))) == 0)
+					feedback_mode &= ((uint8_t)~READABLE_TEXT_ONLY);
+				else if ((tmp_var = strcmp_P(command_arg, PSTR("off"))) == 0)
+					feedback_mode |= READABLE_TEXT_ONLY;
+#ifdef INCLUDE_SIMPLE_EMBEDDED
+				command_succedded = (tmp_var == 0);
+#endif
 			}
 		}
+#if !DEBUG
+		// echo <on>|<off>
+		else if(strcmp_P(command_arg, PSTR("echo")) == 0)
+		{
+			//Argument 2: <on>|<off>
+			// Set if we are going to echo the characters back to the client or not
+			command_arg = get_cmd_arg(1);
+			if (command_arg != 0)
+			{
+				if ((tmp_var = strcmp_P(command_arg, PSTR("on"))) == 0)
+					feedback_mode |= ECHO;
+				else if ((tmp_var = strcmp_P(command_arg, PSTR("off"))) == 0)
+					feedback_mode &= ((uint8_t)~ECHO);
+
+#ifdef INCLUDE_SIMPLE_EMBEDDED
+				command_succedded = (tmp_var == 0);
+#endif
+			}
+		}
+		// verbose <on>|<off>
+		else if(strcmp_P(command_arg, PSTR("verbose")) == 0)
+		{
+			//Argument 2: <on>|<off>
+			// Set if we are going to show extended error information when executing commands
+			command_arg = get_cmd_arg(1);
+			if (command_arg != 0)
+			{
+				if ((tmp_var = strcmp_P(command_arg, PSTR("on"))) == 0)
+					feedback_mode |= EXTENDED_INFO;
+				else if ((tmp_var = strcmp_P(command_arg, PSTR("off"))) == 0)
+					feedback_mode &= ((uint8_t)~EXTENDED_INFO);
+#ifdef INCLUDE_SIMPLE_EMBEDDED
+				command_succedded = (tmp_var == 0);
+#endif
+			}
+		}
+#endif
+#ifdef INCLUDE_SIMPLE_EMBEDDED
+		// eem (Embedded End Marker) <on>|<off>
+		else if(strcmp_P(command_arg, PSTR("eem")) == 0)
+		{
+			//Argument 2: <on>|<off>
+			//Set if we are going to enable char 26 (Ctrl+z) as end-of-data
+			//marker to separate the returned data and the actual
+			//result of the operation
+			command_arg = get_cmd_arg(1);
+			if (command_arg != 0)
+			{
+				if ((tmp_var = strcmp_P(command_arg, PSTR("on"))) == 0)
+					feedback_mode |= EMBEDDED_END_MARKER;
+				else if ((tmp_var = strcmp_P(command_arg, PSTR("off"))) == 0)
+					feedback_mode &= ((uint8_t)~EMBEDDED_END_MARKER);
+#ifdef INCLUDE_SIMPLE_EMBEDDED
+				command_succedded = (tmp_var == 0);
+#endif
+			}
+		}
+		// ecountf
+		// returns the number of files in current folder |count|
+		else if(strcmp_P(command_arg, PSTR("efcount")) == 0)
+		{
+			//Argument 2: wild card search
+			command_arg = get_cmd_arg(1);
+			file_index = 0;
+
+			//Reset FAT
+			fat_reset_dir(dd);
+
+			// count the number of files
+			struct fat_dir_entry_struct dir_entry;
+			while(fat_read_dir(dd, &dir_entry))
+			{
+				// We are not listing directory entries
+				if (dir_entry.attributes & FAT_ATTRIB_DIR)
+					continue;
+
+				//Check if we are to do a wild card search
+				tmp_var = (command_arg == 0);
+				if(command_arg != 0)
+					if (wildcmp(command_arg, dir_entry.long_name))
+						tmp_var = 1;
+
+				//If no arguments list all files, otherwise we only list the files
+				//being matched by the wildcard search
+				if (tmp_var && (dir_entry.attributes & FAT_ATTRIB_DIR) == 0)
+					file_index++;
+			}
+
+
+			uart_puts_p(PSTR("count|"));
+			uart_putdw_dec(file_index);
+#ifdef INCLUDE_SIMPLE_EMBEDDED
+		command_succedded = 1;
+#endif
+		}
+		// efname <file index>
+		// Returns the name and the size of a file <name>|<size>
+		else if(strcmp_P(command_arg, PSTR("efinfo")) == 0)
+		{
+			//Argument 2: File index
+			command_arg = get_cmd_arg(1);
+			if (command_arg != 0)
+			{
+				// File index should always be a number
+				if ((command_arg = is_number(command_arg, strlen(command_arg))) != 0)
+				{
+					file_index = strtolong(command_arg);
+					uint32_t temp_index = 0;
+
+					//Reset FAT
+					fat_reset_dir(dd);
+
+					// find the file with this index
+					struct fat_dir_entry_struct dir_entry;
+					while(fat_read_dir(dd, &dir_entry))
+					{
+						// We are not listing directory entries
+						if (dir_entry.attributes & FAT_ATTRIB_DIR)
+							continue;
+
+						if (temp_index == file_index)
+						{
+							uart_puts(dir_entry.long_name);
+							uart_putc('|');
+							uart_putdw_dec(dir_entry.file_size);
+#ifdef INCLUDE_SIMPLE_EMBEDDED
+							command_succedded = 1;
+#endif
+							break;
+						}
+						temp_index++;
+					}
+				}
+			}
+		}
+#endif //INCLUDE_SIMPLE_EMBEDDED
 #endif
 #if SD_RAW_WRITE_BUFFERING
 		else if(strcmp_P(command_arg, PSTR("sync")) == 0)
 		{
 			if(!sd_raw_sync())
-				uart_puts_p(PSTR("error syncing disk\n"));
+			{
+				if ((feedback_mode & EXTENDED_INFO) > 0)
+					uart_puts_p(PSTR("error syncing disk\n"));
+			}
+#ifdef INCLUDE_SIMPLE_EMBEDDED
+			else
+			{
+				command_succedded = 1;
+			}
+#endif
 		}
 #endif
 		else
 		{
-			uart_puts_p(PSTR("unknown command: "));
-			uart_puts(command_arg);
-			uart_putc('\n');
+			if ((feedback_mode & EXTENDED_INFO) > 0)
+			{
+				uart_puts_p(PSTR("unknown command: "));
+				uart_puts(command_arg);
+			}
 		}
     }
 	
@@ -1581,9 +1904,11 @@ uint8_t append_file(char* file_name)
 	struct fat_file_struct* fd = open_file_in_dir(fs, dd, file_name);
 	if(!fd)
 	{
-		uart_puts_p(PSTR("!error opening "));
-		uart_puts(file_name);
-		uart_putc('\n');
+		if ((feedback_mode & EXTENDED_INFO) > 0)
+		{
+			uart_puts_p(PSTR("!error opening "));
+			uart_puts(file_name);
+		}
 		return(0);
 	}
 
@@ -1594,16 +1919,21 @@ uint8_t append_file(char* file_name)
 	//Seeks the end of the file : offset = EOF location
 	if(!fat_seek_file(fd, &offset, FAT_SEEK_END))
 	{
-		uart_puts_p(PSTR("!error seeking on "));
-		uart_puts(file_name);
-		uart_putc('\n');
-
+		if ((feedback_mode & EXTENDED_INFO) > 0)
+		{
+			uart_puts_p(PSTR("!error seeking on "));
+			uart_puts(file_name);
+		}
 		fat_close_file(fd);
 		return(0);
 	}
 
 #if DEBUG
 	uart_puts_p(PSTR("Recording\n"));
+#endif
+#ifdef INCLUDE_SIMPLE_EMBEDDED
+	if ((feedback_mode & EMBEDDED_END_MARKER) > 0)
+		uart_putc((char)0x1A); // Ctrl+Z ends the data and marks the start of result
 #endif
 	//give a different prompt to indicate no echoing
 	uart_putc('<');
@@ -1647,13 +1977,19 @@ uint8_t append_file(char* file_name)
 					{
 						//Record first half the buffer
 						if(fat_write_file(fd, (uint8_t*) input_buffer, checked_spot) != checked_spot)
-							uart_puts_p(PSTR("error writing to file\n"));
+						{
+							if ((feedback_mode & EXTENDED_INFO) > 0)
+								uart_puts_p(PSTR("error writing to file\n"));
+						}
 					}
 					else //checked_spot > (BUFF_LEN/2)
 					{
 						//Record second half the buffer
 						if(fat_write_file(fd, (uint8_t*) input_buffer + (BUFF_LEN/2), (checked_spot - (BUFF_LEN/2)) ) != (checked_spot - (BUFF_LEN/2)) )
-							uart_puts_p(PSTR("error writing to file\n"));
+						{
+							if ((feedback_mode & EXTENDED_INFO) > 0)
+								uart_puts_p(PSTR("error writing to file\n"));
+						}
 					}
 					unsigned spot = checked_spot > BUFF_LEN/2 ? BUFF_LEN/2 : 0;
 					unsigned sp = spot; // start of new buffer
@@ -1712,7 +2048,8 @@ uint8_t append_file(char* file_name)
 			//Record first half the buffer
 			if(fat_write_file(fd, (uint8_t*) input_buffer, (BUFF_LEN/2) ) != (BUFF_LEN/2) )
 			{
-				uart_puts_p(PSTR("error writing to file\n"));
+				if ((feedback_mode & EXTENDED_INFO) > 0)
+					uart_puts_p(PSTR("!error writing to file\n"));
 				break;
 			}
 		}
@@ -1720,11 +2057,12 @@ uint8_t append_file(char* file_name)
 		if(checked_spot == BUFF_LEN) //We've finished checking the second half the buffer
 		{
 			checked_spot = 0;
-			
+
 			//Record second half the buffer
 			if(fat_write_file(fd, (uint8_t*) input_buffer + (BUFF_LEN/2), (BUFF_LEN/2) ) != (BUFF_LEN/2) )
 			{
-				uart_puts_p(PSTR("error writing to file\n"));
+				if ((feedback_mode & EXTENDED_INFO) > 0)
+					uart_puts_p(PSTR("!error writing to file\n"));
 				break;
 			}
 		}
@@ -1740,13 +2078,19 @@ uint8_t append_file(char* file_name)
 	{
 		//Record first half the buffer
 		if(fat_write_file(fd, (uint8_t*) input_buffer, checked_spot) != checked_spot)
-			uart_puts_p(PSTR("error writing to file\n"));
+		{
+			if ((feedback_mode & EXTENDED_INFO) > 0)
+				uart_puts_p(PSTR("!error writing to file\n"));
+		}
 	}
 	else //checked_spot > (BUFF_LEN/2)
 	{
 		//Record second half the buffer
 		if(fat_write_file(fd, (uint8_t*) input_buffer + (BUFF_LEN/2), (checked_spot - (BUFF_LEN/2)) ) != (checked_spot - (BUFF_LEN/2)) )
-			uart_puts_p(PSTR("error writing to file\n"));
+		{
+			if ((feedback_mode & EXTENDED_INFO) > 0)
+				uart_puts_p(PSTR("!error writing to file\n"));
+		}
 	}
 
 	fat_close_file(fd);
@@ -1877,7 +2221,9 @@ uint8_t read_line(char* buffer, uint8_t buffer_length)
             continue;
         }
 
-        uart_putc(c);
+		// Only echo back if this is enabled
+		if ((feedback_mode & ECHO) > 0)
+			uart_putc(c);
 
         if(c == '\n')
         {
@@ -1989,8 +2335,7 @@ uint8_t read_buffer(char* buffer, uint8_t buffer_length)
 
             continue;
         }
-
-        uart_putc(c);
+			uart_putc(c);
 
         //if(c == '\n')
         if(c == 26)
@@ -2019,6 +2364,10 @@ uint32_t strtolong(const char* str)
 
 uint8_t find_file_in_dir(struct fat_fs_struct* fs, struct fat_dir_struct* dd, const char* name, struct fat_dir_entry_struct* dir_entry, uint8_t use_wild_card)
 {
+	//Reset FAT
+	fat_reset_dir(dd);
+
+	//Find the file
     while(fat_read_dir(dd, dir_entry))
     {
         if((strcmp(dir_entry->long_name, name) == 0) || ((use_wild_card == 1) && (wildcmp(name, dir_entry->long_name) == 1)))
@@ -2070,7 +2419,7 @@ uint8_t print_disk_info(const struct fat_fs_struct* fs)
 
 void print_menu(void)
 {
-	uart_puts_p(PSTR("\nOpenLog v1.51\n"));
+	uart_puts_p(PSTR("\nOpenLog v1.62\n"));
 	uart_puts_p(PSTR("Available commands:\n"));
 	uart_puts_p(PSTR("new <file>\t\t: Creates <file>\n"));
 	uart_puts_p(PSTR("append <file>\t\t: Appends text to end of <file>. The text is read from the UART in a stream and is not echoed. Finish by sending Ctrl+z (ASCII 26)\n"));
@@ -2086,6 +2435,11 @@ void print_menu(void)
 	uart_puts_p(PSTR("disk\t\t\t: Shows card manufacturer, status, filesystem capacity and free storage space\n"));
 	uart_puts_p(PSTR("init\t\t\t: Reinitializes and reopens the memory card\n"));
 	uart_puts_p(PSTR("sync\t\t\t: Ensures all buffered data is written to the card\n"));
+	uart_puts_p(PSTR("verbose <on/off>\t\t\t: Turn on or off the extended error information. Default is on.\n"));
+	uart_puts_p(PSTR("echo <on/off>\t\t\t: Turn on or off character echoing. Default is on.\n"));
+	uart_puts_p(PSTR("eem <on/off>\t\t\t: Turn on or off Embedded End Marker - simplifies embedded communications between a uC and openLog. Default is off.\n"));
+	uart_puts_p(PSTR("efcount\t\t\t: Return the total number of files in the current directory.\n"));
+	uart_puts_p(PSTR("efinfo <file index>\t\t\t: Returns the file name and file size of <file index> in the current directory\n"));
 
 	uart_puts_p(PSTR("\nMenus:\n"));
 	uart_puts_p(PSTR("set\t\t\t: Menu to configure system boot mode\n"));
