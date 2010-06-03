@@ -61,6 +61,7 @@ public class OpenLogTest {
 
     // Create folder
     changeFolder("misc", openLog);
+
     // Create folder
     changeFolder("test", openLog);
 
@@ -82,22 +83,32 @@ public class OpenLogTest {
     }
 
     // *************************************************** //
-    // Create file openlog1.txt if it does not already exist
+    // Create 10 files...
     // *************************************************** //
-    if (openLog.fileSize("openlog1.txt") == null) {
-      System.out.println(" ");
-      System.out.println("Creating file \"openlog1.txt\"");
-      fileData.clear();
-      fileData.append("Just some content");
-      fileData.append("\r\n");
+    for (int i = 0; i < 10; i++) {
+      bufferTemp.clear();
+      bufferTemp.append("openlog_");
+      bufferTemp.append(i);
+      bufferTemp.append(".txt");
 
-      if (!openLog.writeFile("openlog1.txt", fileData, true)) {
-        System.out.println("Could not write to file \"openlog1.txt\"");
-      } else {
-        System.out.println("Success: \"openlog1.txt\"");
+      if (openLog.fileSize(bufferTemp.toString()) == null) {
+        System.out.println(" ");
+        System.out.print("Creating file \"");
+        System.out.print(bufferTemp.toString());
+        System.out.println("\"");
+        fileData.clear();
+        fileData.append("Just some content");
+        fileData.append("\r\n");
+
+        if (!openLog.writeFile(bufferTemp.toString(), fileData, true)) {
+          System.out.print("Could not write to file \"");
+        } else {
+          System.out.print("Success: \"");
+        }
+        System.out.print(bufferTemp.toString());
+        System.out.println("\"");
       }
     }
-
 
     // List all the files in the directory
     listFiles(openLog, bufferTemp);

@@ -1426,8 +1426,8 @@ void command_shell(void)
 			fat_close_file(fd);
 #ifdef INCLUDE_SIMPLE_EMBEDDED
 			command_succedded = 1;
-#endif
 		if ((feedback_mode & EMBEDDED_END_MARKER) == 0)
+#endif
 			uart_putc('\n');
 		}
 		else if(strncmp_P(command_arg, PSTR("read"), 4) == 0)
@@ -1508,8 +1508,8 @@ void command_shell(void)
 			fat_close_file(fd);
 #ifdef INCLUDE_SIMPLE_EMBEDDED
 			command_succedded = 1;
-#endif
 		if ((feedback_mode & EMBEDDED_END_MARKER) == 0)
+#endif
 			uart_putc('\n');
 		}
 		else if(strcmp_P(command_arg, PSTR("disk")) == 0)
@@ -1545,7 +1545,9 @@ void command_shell(void)
 				command_succedded = 1;
 #endif
 			}
+#ifdef INCLUDE_SIMPLE_EMBEDDED
 			if ((feedback_mode & EMBEDDED_END_MARKER) == 0)
+#endif
 				uart_putc('\n');
 		}
 #if FAT_WRITE_SUPPORT
@@ -1797,9 +1799,8 @@ void command_shell(void)
 					feedback_mode |= EMBEDDED_END_MARKER;
 				else if ((tmp_var = strcmp_P(command_arg, PSTR("off"))) == 0)
 					feedback_mode &= ((uint8_t)~EMBEDDED_END_MARKER);
-#ifdef INCLUDE_SIMPLE_EMBEDDED
+
 				command_succedded = (tmp_var == 0);
-#endif
 			}
 		}
 		// ecountf
@@ -1836,9 +1837,8 @@ void command_shell(void)
 
 			uart_puts_p(PSTR("count|"));
 			uart_putdw_dec(file_index);
-#ifdef INCLUDE_SIMPLE_EMBEDDED
-		command_succedded = 1;
-#endif
+
+			command_succedded = 1;
 		}
 		// efname <file index>
 		// Returns the name and the size of a file <name>|<size>
@@ -1870,9 +1870,9 @@ void command_shell(void)
 							uart_puts(dir_entry.long_name);
 							uart_putc('|');
 							uart_putdw_dec(dir_entry.file_size);
-#ifdef INCLUDE_SIMPLE_EMBEDDED
+
 							command_succedded = 1;
-#endif
+
 							break;
 						}
 						temp_index++;
@@ -2453,12 +2453,14 @@ void print_menu(void)
 	uart_puts_p(PSTR("disk\t\t\t: Shows card manufacturer, status, filesystem capacity and free storage space\n"));
 	uart_puts_p(PSTR("init\t\t\t: Reinitializes and reopens the memory card\n"));
 	uart_puts_p(PSTR("sync\t\t\t: Ensures all buffered data is written to the card\n"));
+	uart_puts_p(PSTR("binary <on/off>\t\t\t: Turn on or off binary mode. Default is on.\n"));
 	uart_puts_p(PSTR("verbose <on/off>\t\t\t: Turn on or off the extended error information. Default is on.\n"));
 	uart_puts_p(PSTR("echo <on/off>\t\t\t: Turn on or off character echoing. Default is on.\n"));
+#ifdef INCLUDE_SIMPLE_EMBEDDED
 	uart_puts_p(PSTR("eem <on/off>\t\t\t: Turn on or off Embedded End Marker - simplifies embedded communications between a uC and openLog. Default is off.\n"));
 	uart_puts_p(PSTR("efcount\t\t\t: Return the total number of files in the current directory.\n"));
 	uart_puts_p(PSTR("efinfo <file index>\t\t\t: Returns the file name and file size of <file index> in the current directory\n"));
-
+#endif
 	uart_puts_p(PSTR("\nMenus:\n"));
 	uart_puts_p(PSTR("set\t\t\t: Menu to configure system boot mode\n"));
 	uart_puts_p(PSTR("baud\t\t\t: Menu to configure baud rate\n"));

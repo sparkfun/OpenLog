@@ -95,7 +95,7 @@ import stamp.math.*;
  *      function.
  *
  * @author Paul Ring - hexor@coolbox.se
- * @version 1.01 - June, 2010
+ * @version 1.1 - June, 2010
  */
 
 public class OpenLog {
@@ -251,10 +251,16 @@ public class OpenLog {
       opBuffer.clear();
       opBuffer.append("new ");
       opBuffer.append(fileName);
+      // Send the command to create a new file
       if (!openLogExecute(opBuffer.toString(), null, shellReady))
         return false;
+      // The file should exist now
+      if (fileSize(fileName) == null)
+        return false;
     }
-
+    // Either we want to append or to write to the file
+    // Writing to the always starts at position 0 which will
+    // replace any data in the file located at position 0-fileData.length()
     opBuffer.clear();
     opBuffer.append(appendMode ? "append " : "write ");
     opBuffer.append(fileName);
@@ -263,7 +269,7 @@ public class OpenLog {
     }
 
     txUart.sendString(fileData.toString());
-    CPU.delay(500);
+    delay(appendMode ? 0 : 1); // Should be enough for most cases
 
     if (appendMode) {
       // Send Ctrl+Z to escape from append mode
@@ -272,9 +278,8 @@ public class OpenLog {
       // Send a single LF ('\n') to exit from write mode
       txUart.sendByte(LF);
     }
-    // We should be fine if we receive the shellReady now
-    opBuffer.clear();
-    return (openLogExecute(opBuffer.toString(), null, shellReady));
+    // We should be alive now
+    return openLogAlive();
   }
 
   private boolean openLogExecute(String command, StringBuffer reply, char promptChar) {
@@ -288,8 +293,8 @@ public class OpenLog {
     buff.clear();
     buff.append(command);
     txUart.sendString(buff.toString());
-    CPU.delay(100);
     txUart.sendByte('\n');
+    delay(1);
 
     buff.clear();
 
@@ -301,7 +306,7 @@ public class OpenLog {
     // Give the module some time to respond
     // Collect the return value and the result
     timer.mark();
-    while (!timer.timeout(1500) && !rxUart.byteAvailable()) {CPU.delay(10);}
+    while (!timer.timeout(10000) && !rxUart.byteAvailable()) {CPU.delay(10);}
     while (rxUart.byteAvailable() && !endTokenFound) {
       char ch = (char)rxUart.receiveByte();
       if ((ch != (char)EscChar) && (ch != 0) && (count < capacity)) {
@@ -344,6 +349,11 @@ public class OpenLog {
 
   public static boolean isNumeric(char ch) {
     return ((ch >= '0') && (ch <= '9') || (ch == '-') || (ch == '+'));
+  }
+
+  private void delay(int delay) {
+    for (int i = 0; i <= delay; i++)
+      CPU.delay(2500); // 2500 * 95.48us * i
   }
 
   private boolean listDirStart() {
@@ -424,15 +434,12 @@ public class OpenLog {
 
   public boolean listDirectoryStart() {
 
+    // Cannot start a new directory listing while we have one active
+    // Use listDirectoryEnd() before calling this function
     if (dirListingStarted) {return false;}
-    int openLogInit = 0;
 
-    // @Note: We are trying to start a directory listing - if that is failing then try to init
-    // the memory card. It might be that the memory card has been ejected or there is
-    // some other problem - either way; restart it!
+    int openLogInit = 0;
     while (!(dirListingStarted = listDirStart())) {
-      if (!openLogRestart()) { break; }   // Restart the card
-      openLogInit();                      // Try to initialize
       if (openLogInit++ > 2) { break; };  // Made 2 tries and still the problem is not fixed
     }
 
@@ -458,13 +465,7 @@ public class OpenLog {
     if (fileIsOpen) { return false; }
 
     int openLogInit = 0;
-
-    // @Note: We are trying to open a file - if that is failing then try to init
-    // the memory card. It might be that the memory card has been ejected for a while
-    // or there is some other problem - either way; restart it!
     while (!(fileIsOpen = (fileSize(fileName) != null))) {
-      if (!openLogRestart()) { break; }  // Restart the card
-      openLogInit();                     // Try to initialize
       if (openLogInit++ > 2) { break; }; // Made 2 tries and still the problem is not fixed
     }
 
@@ -511,16 +512,10 @@ public class OpenLog {
 
     // Basic checking - the file should not be open when we call this function
     if ((fileName.length() == 0) || (fileData.length() == 0)) { return false; }
-
     boolean success = false;
-    int openLogInit = 0;
 
-    // @Note: We are trying to write to file - if that is failing then try to init
-    // the memory card. It might be that the memory card has been ejected for a while
-    // or there is some other problem - either way; restart it!
+    int openLogInit = 0;
     while (!(success = fwrite(fileName, fileData, append))) {
-      if (!openLogRestart()) { break; }  // Restart the card
-      openLogInit();                     // Try to initialize
       if (openLogInit++ > 2) { break; }; // Made 2 tries and still the problem is not fixed
     }
 
@@ -619,13 +614,13 @@ public class OpenLog {
 
   public boolean openLogRestart() {
 
-    // Pin reset
+    // Hardware reset according to OpenLog documentation
     CPU.writePin(resetPin, false);
-    CPU.delay(1000);
+    delay(0);
     CPU.writePin(resetPin, true);
-    CPU.delay(2000);
+    delay(8); // Give the OpenLog some time to initialize itself
 
-    // Send escape char
+    // Send escape char in case it enters append mode
     escapeCharAck();
 
     // Enable the embedded mode
@@ -635,10 +630,12 @@ public class OpenLog {
       return false;
 
     opBuffer.clear();
-    return (openLogExecute(opBuffer.toString(), null, shellReady));
+    return openLogAlive();
   }
 
   private boolean openLogAlive() {
+    // Sending an empty string to the OpenLog will force it to
+    // respond with the shell in which case we know that it's alive
     opBuffer.clear();
     return (openLogExecute(opBuffer.toString(), null, shellReady));
   }
