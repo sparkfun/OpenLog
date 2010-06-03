@@ -63,7 +63,7 @@ import stamp.math.*;
  *      current directory.
  *
  * 2.   Open a file. Returns value true/false. Read the file contents into buffer <buffer>. Please note that
- *      if you are only using 2 pins (no handshaking) to connect the Javelin to OpenLog you will have to think
+ *      since you are only using 2 pins (no handshaking) to connect the Javelin to OpenLog you will have to think
  *      that the UART buffer is 256 bytes (that according to the Javelin Stamp documentation version 1.0, page 188).
  *      Do not try to read more than that or you will most likely loose data. My suggestion is that you start with
  *      a small value, e.g. 50 bytes and increase this after your needs.
@@ -77,12 +77,12 @@ import stamp.math.*;
  *
  * 4.   Delete file <file name>. Returns true/false.
  *
- * 5.   This function will trigger a OpemLog hardware reset Please note that after you calling this function you *must*
- *      also call openLogInit() in order to set some parameters used internally in the OpenLog internal firmware.
+ * 5.   This function will trigger a OpenLog hardware reset Please note that after you are calling this function you *must*
+ *      also call openLogInit() in order to set some parameters used internally in the OpenLog firmware.
  *
- * 6.   Returns the corresponding FileInfo class containing file information for <filename> like the file size.
+ * 6.   Returns the corresponding FileInfo class containing file information for <file name> like the file size.
  *
- * 7.   Create a directory and enter that directory. Please note that this will invalidate any directory listing or open file.
+ * 7.   Create a directory and enter that directory. Please note that this will invalidate any directory listing or open file
  *      handle.
  *
  * 8.   This function is performing a "cd .." command on the OpenLog. You will have to keep track yourself of where in the
@@ -95,7 +95,7 @@ import stamp.math.*;
  *      function.
  *
  * @author Paul Ring - hexor@coolbox.se
- * @version 1.0 - June, 2010
+ * @version 1.01 - June, 2010
  */
 
 public class OpenLog {
@@ -108,7 +108,7 @@ public class OpenLog {
     public Int32 filePosition = new Int32(0,0);             // File position
   }
 
-  public class StringSplit {
+  private class StringSplit {
     public int startIndex;      // Points to first character in command line argument
     public int endIndex;        // Pointes to the last character in command line argument
 
@@ -133,7 +133,7 @@ public class OpenLog {
   private final static char CR = '\r';              // Carriage return
   private static final char EscChar = (char)0x1A;   // Default Ctrl-Z
 
-  private boolean dirListingStarted = false;  // Used to indicate a directory listning
+  private boolean dirListingStarted = false;  // Used to indicate that a directory listning is started
   private int dirCountFiles = -1;             // Number of files in current directory
   private int dirListingIndex = -1;           // Current file index
   private StringBuffer opBuffer = new StringBuffer(32);
@@ -155,7 +155,7 @@ public class OpenLog {
       stringSplit[i] = new StringSplit();
     }
   }
-  //Returns the number of command line arguments
+
   private int countSplitStrings()
   {
     int count = 0;
@@ -345,10 +345,7 @@ public class OpenLog {
   public static boolean isNumeric(char ch) {
     return ((ch >= '0') && (ch <= '9') || (ch == '-') || (ch == '+'));
   }
-  /**
-   * Starts a directory listning of files (internal function).
-   * @return true if the directory listing could be started or false otherwise
-   */
+
   private boolean listDirStart() {
 
     // Calling the "dirInfoInvalid" function will invalidate
@@ -362,7 +359,7 @@ public class OpenLog {
             // Add the characters
             opBuffer.clear();
             for (int i = stringSplit[1].startIndex; i < stringSplit[1].endIndex; i++) {
-              if (!isNumeric(ch[i])) {break; /*enough here, we are not execpting anything more*/}
+              if (!isNumeric(ch[i])) {break;} // enough here, we are not execpting anything more
               opBuffer.append(ch[i]);
             }
 
@@ -406,7 +403,7 @@ public class OpenLog {
             // Add the file size
             opBuffer.clear();
             for (int i = stringSplit[1].startIndex; i < stringSplit[1].endIndex; i++) {
-              if (!isNumeric(ch[i])) {break; /*enough here, we are not execpting anything more*/}
+              if (!isNumeric(ch[i])) {break;} // enough here, we are not excepting anything more
               opBuffer.append(ch[i]);
             }
 
@@ -430,9 +427,9 @@ public class OpenLog {
     if (dirListingStarted) {return false;}
     int openLogInit = 0;
 
-    // @Note: We are trying to open a file - if that is failing then try to init
-    // the memory card. It might be that the memory card has been ejected for a while
-    // or there is some other problem - either way; restart it!
+    // @Note: We are trying to start a directory listing - if that is failing then try to init
+    // the memory card. It might be that the memory card has been ejected or there is
+    // some other problem - either way; restart it!
     while (!(dirListingStarted = listDirStart())) {
       if (!openLogRestart()) { break; }   // Restart the card
       openLogInit();                      // Try to initialize
@@ -495,15 +492,14 @@ public class OpenLog {
     buffer.clear();
 
     opBuffer.clear();
-    opBuffer.append("read ");                       // Read command
-    opBuffer.append(fileInfo.fileName.toString());  // File name
+    opBuffer.append("read ");                           // Read command
+    opBuffer.append(fileInfo.fileName.toString());      // File name
 
     opBuffer.append(" ");
     opBuffer.append(fileInfo.filePosition.toString());  // File position
     opBuffer.append(" ");
-    opBuffer.append(length);    // Length to read
-
-    fileInfo.filePosition.add(length); // Keep track of the file position
+    opBuffer.append(length);                            // Length to read
+    fileInfo.filePosition.add(length);                  // Keep track of the file position
 
     // Get the data from the OpenLog
     return (openLogExecute(opBuffer.toString(), buffer, shellReady));
@@ -540,7 +536,7 @@ public class OpenLog {
     opBuffer.append("md ");
     opBuffer.append(dirName);
 
-    return openLogExecute(opBuffer.toString(), null, shellReady);
+    return (openLogExecute(opBuffer.toString(), null, shellReady));
   }
   public boolean prevDir() {
     if (!openLogAlive()) { return false; }
@@ -603,7 +599,7 @@ public class OpenLog {
     opBuffer.clear();
     for (int i = 0; i < length; i++) {
       char ch = tempBuffer.charAt(i);
-      if (!isNumeric(ch)) { // enough here, we are not execpting anything more
+      if (!isNumeric(ch)) { // enough here, we are not excepting anything more
         break;
       }
       opBuffer.append(ch);

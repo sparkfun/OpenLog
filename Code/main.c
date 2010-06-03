@@ -537,21 +537,33 @@ char setting_uart_speed; //This is the baud rate that the system runs at, defaul
 char setting_system_mode; //This is the mode the system runs in, default is MODE_NEWLOG
 char setting_escape_character; //This is the ASCII character we look for to break logging, default is ctrl+z
 char setting_max_escape_character; //Number of escape chars before break logging, default is 3
-
+volatile uint8_t escape_chars_received; //Keeps track of the number of escape received
+volatile uint8_t append_mode; //1 if in append mode
 uint8_t feedback_mode = (ECHO | EXTENDED_INFO | READABLE_TEXT_ONLY);
 
 //Circular buffer UART RX interrupt
 //Is only used during append
 ISR(USART_RX_vect)
 {
-	input_buffer[read_spot] = UDR0;
-	read_spot++;
 	STAT1_PORT ^= (1<<STAT1); //Toggle the STAT1 LED each time we receive a character
-	if(read_spot == BUFF_LEN) read_spot = 0;
+	char ch = (char)UDR0;
+
+	// Do not add the escape character to the incoming buffer if this is the append mode
+	if ((append_mode == 1) && (ch == setting_escape_character))
+		escape_chars_received++;
+	else
+	{
+		escape_chars_received = 0;
+		input_buffer[read_spot] = ch;
+
+		read_spot++;
+		if(read_spot == BUFF_LEN) read_spot = 0;
+	}
 }
 
 int main(void)
 {
+	//Do basic initialization
 	ioinit();
 
 	//If we are in new log mode, find a new file name to write to
@@ -570,6 +582,7 @@ int main(void)
 
 void ioinit(void)
 {
+	append_mode = 0;
     //Init Timer0 for delay_us
     //TCCR0B = (1<<CS00); //Set Prescaler to clk/1 (assume we are running at internal 1MHz). CS00=1 
     TCCR0B = (1<<CS01); //Set Prescaler to clk/8 : 1click = 1us(assume we are running at internal 8MHz). CS01=1 
@@ -1202,7 +1215,11 @@ void command_shell(void)
 			uart_putc('!');
 #endif
 		//print prompt
-		uart_puts_p(PSTR("\n>"));
+		char* p;
+		if ((p = get_cmd_arg(0)) != 0)
+			if (strlen(p) > 0 && count_cmd_args() == 1)
+				uart_putc('\n');
+		uart_putc('>');
 
 		//read command
 		char* command = buffer;
@@ -1410,6 +1427,8 @@ void command_shell(void)
 #ifdef INCLUDE_SIMPLE_EMBEDDED
 			command_succedded = 1;
 #endif
+		if ((feedback_mode & EMBEDDED_END_MARKER) == 0)
+			uart_putc('\n');
 		}
 		else if(strncmp_P(command_arg, PSTR("read"), 4) == 0)
 		{
@@ -1490,6 +1509,8 @@ void command_shell(void)
 #ifdef INCLUDE_SIMPLE_EMBEDDED
 			command_succedded = 1;
 #endif
+		if ((feedback_mode & EMBEDDED_END_MARKER) == 0)
+			uart_putc('\n');
 		}
 		else if(strcmp_P(command_arg, PSTR("disk")) == 0)
 		{
@@ -1524,6 +1545,8 @@ void command_shell(void)
 				command_succedded = 1;
 #endif
 			}
+			if ((feedback_mode & EMBEDDED_END_MARKER) == 0)
+				uart_putc('\n');
 		}
 #if FAT_WRITE_SUPPORT
 		else if(strncmp_P(command_arg, PSTR("rm"), 2) == 0)
@@ -1619,7 +1642,6 @@ void command_shell(void)
 				continue;
 			}
 
-			uart_putc('\n');
 			//Seek file position
 			if(!fat_seek_file(fd, &offset, FAT_SEEK_SET))
 			{
@@ -1900,6 +1922,7 @@ void command_shell(void)
 uint8_t append_file(char* file_name)
 {
 
+	append_mode = 1;
 	//search file in current directory and open it 
 	struct fat_file_struct* fd = open_file_in_dir(fs, dd, file_name);
 	if(!fd)
@@ -1909,6 +1932,7 @@ uint8_t append_file(char* file_name)
 			uart_puts_p(PSTR("!error opening "));
 			uart_puts(file_name);
 		}
+		append_mode = 0;
 		return(0);
 	}
 
@@ -1925,6 +1949,7 @@ uint8_t append_file(char* file_name)
 			uart_puts(file_name);
 		}
 		fat_close_file(fd);
+		append_mode = 0;
 		return(0);
 	}
 
@@ -1940,14 +1965,12 @@ uint8_t append_file(char* file_name)
 
 	sbi(STAT1_PORT, STAT1); //Turn on indicator LED
 
-	char escape_chars_received = 0;
-	
+	escape_chars_received = 0;
 	read_spot = 0;
 	checked_spot = 0;
 
 	//Clear circular buffer
-	for(uint16_t i = 0 ; i < BUFF_LEN ; i++)
-		input_buffer[i] = 0;
+	memset((uint8_t*)input_buffer, 0, BUFF_LEN);
 		
 	//Start UART buffered interrupts
 	UCSR0B |= (1<<RXCIE0); //Enable receive interrupts
@@ -1966,7 +1989,10 @@ uint8_t append_file(char* file_name)
 		uint16_t timeout_counter = 0;
 
 		while(checked_spot == read_spot) 
-		{ 
+		{
+			if(escape_chars_received >= setting_max_escape_character) //Check if we received any escape characters
+				break;
+
 			if( ++timeout_counter > 5000 ) 
 			{
 				timeout_counter = 0;
@@ -2021,26 +2047,17 @@ uint8_t append_file(char* file_name)
 					//delay_ms(1); 
 				}
 			}
-
 			delay_ms(1); //Hang out while we wait for the interrupt to occur and advance read_spot
 		}
 
-		if(input_buffer[checked_spot] == setting_escape_character) //Scan for escape character
+		if(escape_chars_received >= setting_max_escape_character) //Check if we received any escape characters
 		{
-			escape_chars_received++;
-			
-			if(escape_chars_received == setting_max_escape_character)
-			{
-				//Disable interrupt and we're done!
-				cli();
-				UCSR0B &= ~(1<<RXCIE0); //Clear receive interrupt enable
-				
-				break;
-			}
+			//Disable interrupt and we're done!
+			cli();
+			UCSR0B &= ~(1<<RXCIE0); //Clear receive interrupt enable
+			break;
 		}
-		else
-			escape_chars_received = 0;
-		
+
 		checked_spot++;
 
 		if(checked_spot == (BUFF_LEN/2)) //We've finished checking the first half the buffer
@@ -2101,7 +2118,8 @@ uint8_t append_file(char* file_name)
 	uart_puts_p(PSTR("Done!\n"));
 #endif
 	uart_puts_p(PSTR("~")); //Indicate a successful record
-	
+	append_mode = 0;
+
 	return(1); //Success!
 }
 

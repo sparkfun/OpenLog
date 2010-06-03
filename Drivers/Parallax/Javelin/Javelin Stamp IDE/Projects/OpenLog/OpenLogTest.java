@@ -3,7 +3,7 @@ import stamp.peripheral.memory.openlog.*;
 /**
  * SparkFun OpenLog test program
  *
- * @version 1.0 April, 2010
+ * @version 1.1 June, 2010
  * @author Paul Ring - hexor@coolbox.se
  */
 
@@ -48,7 +48,6 @@ public class OpenLogTest {
     }
 
     // Initialize the card
-
     if (!openLog.openLogInit()) {
       System.out.println("*** Error: OpenLog cannot be initialized *** ");
       System.out.println("Stopping...");
