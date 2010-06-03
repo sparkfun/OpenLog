@@ -539,7 +539,7 @@ char setting_escape_character; //This is the ASCII character we look for to brea
 char setting_max_escape_character; //Number of escape chars before break logging, default is 3
 volatile uint8_t escape_chars_received; //Keeps track of the number of escape received
 volatile uint8_t append_mode; //1 if in append mode
-uint8_t feedback_mode = (ECHO | EXTENDED_INFO | READABLE_TEXT_ONLY);
+volatile uint8_t feedback_mode = (ECHO | EXTENDED_INFO);
 
 //Circular buffer UART RX interrupt
 //Is only used during append
@@ -550,15 +550,15 @@ ISR(USART_RX_vect)
 
 	// Do not add the escape character to the incoming buffer if this is the append mode
 	if ((append_mode == 1) && (ch == setting_escape_character))
-		escape_chars_received++;
-	else
 	{
-		escape_chars_received = 0;
-		input_buffer[read_spot] = ch;
-
-		read_spot++;
-		if(read_spot == BUFF_LEN) read_spot = 0;
+		escape_chars_received++;
+		if ((feedback_mode & READABLE_TEXT_ONLY) > 0)
+			return;
 	}
+
+	input_buffer[read_spot] = ch;
+	read_spot++;
+	if(read_spot == BUFF_LEN) read_spot = 0;
 }
 
 int main(void)

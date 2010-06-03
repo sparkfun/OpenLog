@@ -12,7 +12,7 @@ import stamp.math.*;
  *************************************************************************
  *
  * This class provides support to access SparkFun OpenLog unit
- *
+ * NOTE! The driver version (1.x) only supports ASCII files; no binary files
  *
  * How to use this class:
  *
@@ -654,6 +654,12 @@ public class OpenLog {
     // Do not show extended error information
     opBuffer.clear();
     opBuffer.append("verbose off");
+    if (!openLogExecute(opBuffer.toString(), null, shellReady))
+      return false;
+
+    // Turn off the binary mode
+    opBuffer.clear();
+    opBuffer.append("binary off");
     if (!openLogExecute(opBuffer.toString(), null, shellReady))
       return false;
 
