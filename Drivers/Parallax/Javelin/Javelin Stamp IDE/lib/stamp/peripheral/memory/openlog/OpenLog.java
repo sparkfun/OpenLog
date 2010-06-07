@@ -294,7 +294,6 @@ public class OpenLog {
     buff.append(command);
     txUart.sendString(buff.toString());
     txUart.sendByte('\n');
-    delay(1);
 
     buff.clear();
 
