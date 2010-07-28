@@ -1,9 +1,10 @@
 OpenLog is an open source project to create a simple to use data logger. 
 
-OpenLog currently supports FAT16 and hopefully FAT32 soon.
+OpenLog currently supports FAT32 and SD cards up to 16GB.
 
 The hardware design is released under CC-SA v3 license.
-The FAT16/FAT32 firmware was originally designed by Roland Riegel and is released under the GPL v2 license.
+The FAT16/FAT32 firmware was originally designed by Roland Riegel and is released under GPL v2.
+OpenLog v2.0 and above uses sdfatlib written by Bill Greiman and is released under GPL v3.
 The OpenLog firmware was created by SparkFun Electronics.
 
 v1.0 was buggy initial release
@@ -13,6 +14,7 @@ v1.3 Added auto buffer record if unit sits idle for more than 5 seconds.
 v1.4 Increase buffer size to 900 bytes. Pinning down URU errors.
 v1.5 Lowered power consumption to ~2mA avg. Added 4800 and 19200 baud rates.
 v1.51 Added configurable escape character, and escape character amount.
-v1.6 Added ability to configure via CONFIG.txt file.
+v1.6 Added ability to configure via config.txt file.
+v2.0 Massive overhaul. Ported to sdfatlib. Now supports FAT16/FAT32/SD/SDHC.
 
 
