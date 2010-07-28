@@ -228,7 +228,7 @@
  Almost all the previous commands have been ported from v1 to v2. The current commands that do not work:
  cd.. - does not work. You can change to an upper directory, but you cannot navigate back down the tree.
  cat - this command was depricated. HEX printing is now done with the 'read' command. We've added a 5th argument to select between ASCII and HEX printing.
- Wild cards do not yet work. So rm and ls do not have wild cards enabled - yet.
+ Wild cards do not yet work. So rm and ls do not have wild cards enabled - yet. Help us out!
  
  Porting OpenLog to work directly under Arduino to work with sdfatlib (http://code.google.com/p/sdfatlib/) by Bill Greiman.
  
