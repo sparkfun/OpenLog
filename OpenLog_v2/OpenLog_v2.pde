@@ -241,10 +241,12 @@
  Get cd.. working
  Seperate OpenLog_v2 into multiple files
  Re-test too many log files created in the newlog setting - 65535. Potentially create thousands of files and see how sdfatlib handles it.
- Test sequential logging.
+ Done - Test sequential logging.
  Get wild card support working for ls and rm
  Get backspace working
  Test rm with directories, and directory wildcards? Maybe not.
+ Get power save working
+ Test compile on a computer that doesn't have WinAVR
  
  Test commands:
  new - works, also in sub dirs
@@ -262,7 +264,37 @@
  
  set - works well
  baud - works well
-*/
+ 
+ 
+ v2.1 - Power save not working. Fixed issue 35. Dropping characters at 57600bps. 
+ 26058 bytes out of 30720
+ Fixed a bug found by Salient (Issue 35). User settings where declared at chars which allowed them to be signed. If a user went from old firmware, to v2,
+ the safety checks would fail because the settings would be read at -1 instead of 255. Declaring user settings as byte fixed issue.
+ 
+ Added "a) Clear user settings" to set menu. This allows us to completely wipe an OpenLog (user settings and config file) to see how it will respond
+ to future firmware changes.
+ 
+ Improved the file 'size' command.
+ 
+ Sequential logging is tested and works.
+ 
+ Receive testing: Using the Test_Sketch found on Github, I am testing the receive reliability at different UART speeds.
+ We need to test a lot of received data. At 57600, 115200, and both from an Arduino (lots of time in between characters becuase of software overhead)
+ and from a raw serial port (almost no time in between characters). I am hoping to make sdfatlib hiccup at 115200, full speed, across a 1MB file. If 
+ I can make it fail, then we can start to increase the buffer size and look at how much RAM sdfatlib has left open for the buffer.
+ 
+ 9600bps from Arduino works fine
+ 57600bps from Arduino drops characters
+ 115200 from Arduino drops characters
+ 
+ It seems that sdfatlib takes longer to write to the SD card than the original file system from Robert Reigel. I'm thinking perhaps
+ we should create a version of OpenLog firmware that is just sequantial logging, no fancy system menus... It might open up some RAM.
+ 
+ If only we could get control of the UART from Arduino's clutches, we could probably handle the ring buffer much better. Not sure how to handle UART
+ interrupts without tearing out HardwareSerial.cpp.
+ 
+ Added README to the Test sketch. Added 115200bps to test sketch.
+ */
 
 #include "SdFat.h"
 #include "SdFatUtil.h" // use functions to print strings from flash memory
@@ -273,19 +305,34 @@
 #include <avr/sleep.h> //Needed for sleep_mode
 
 //Debug turns on (1) or off (0) a bunch of verbose debug statements. Normally use (0)
-//#define DEBUG 1
-#define DEBUG 0
+//#define DEBUG  1
+#define DEBUG  0
+
+//Boot time testing is used to see how long it takes to go from power on to ready to receive characters
+//The problem with this is that millis() is not running while the bootloader is timing out...
+//Current testing shows that time to boot is around 74ms from a hardware reset and 217ms from a power cycle
+//#define BOOTTIME_TESTING 1
+#define BOOTTIME_TESTING 0
+
+//The bigger the receive buffer, the less likely we are to drop characters at high speed. However, the ATmega has a limited amount of RAM.
+//This debug mode allows us to view available RAM at various stages of the program
+//#define RAM_TESTING  1 //On
+#define RAM_TESTING  0 //Off
 
 #define sbi(port, port_pin)   ((port) |= (uint8_t)(1 << port_pin))
 #define cbi(port, port_pin)   ((port) &= (uint8_t)~(1 << port_pin))
 
-#define BUFF_LEN 700 //This is the size of the receive buffer. The bigger it is, the less likely we will overflow the buffer while doing a record to SD. But we have limited amounts of RAM (~1100 bytes)
+//This is the size of the receive buffer. The bigger it is, the less likely we will overflow the buffer while doing a record to SD. But we have limited amounts of RAM (~1100 bytes)
+//#define BUFF_LEN 700 //Original v1.6 size. Allowed for 352 free bytes during run time.
+#define BUFF_LEN 800 //New v2 buffer size. 900 fails. 800 works. 
+
 volatile char input_buffer[BUFF_LEN];
 char general_buffer[25];
 volatile uint16_t read_spot, checked_spot;
 
 #define CFG_FILENAME	"config.txt"
 
+//EEPROM locations for the various user settings
 #define LOCATION_BAUD_SETTING		0x01
 #define LOCATION_SYSTEM_SETTING		0x02
 #define LOCATION_FILE_NUMBER_LSB	0x03
@@ -325,10 +372,14 @@ SdVolume volume;
 SdFile currentDirectory;
 SdFile file;
 
-char setting_uart_speed; //This is the baud rate that the system runs at, default is 9600
-char setting_system_mode; //This is the mode the system runs in, default is MODE_NEWLOG
-char setting_escape_character; //This is the ASCII character we look for to break logging, default is ctrl+z
-char setting_max_escape_character; //Number of escape chars before break logging, default is 3
+byte setting_uart_speed; //This is the baud rate that the system runs at, default is 9600
+byte setting_system_mode; //This is the mode the system runs in, default is MODE_NEWLOG
+byte setting_escape_character; //This is the ASCII character we look for to break logging, default is ctrl+z
+byte setting_max_escape_character; //Number of escape chars before break logging, default is 3
+
+#if BOOTTIME_TESTING
+  unsigned long boottime; //Used to keep track of how long it takes to boot
+#endif
 
 //Used for wild card delete and search
 struct command_arg
@@ -370,12 +421,31 @@ void setup(void)
   if(setting_uart_speed == BAUD_57600) Serial.begin(57600);
   if(setting_uart_speed == BAUD_115200) Serial.begin(115200);
   Serial.print("1");
+  
+#if RAM_TESTING
+  PgmPrint("Free RAM start: ");
+  Serial.println(FreeRam());
+#endif
 
   //Setup SD & FAT
-  if (!card.init()) {PgmPrint("error card.init"); blink_error(ERROR_SD_INIT);} // initialize the SD card
-  if (!volume.init(card)) {PgmPrint("error volume.init"); blink_error(ERROR_SD_INIT);} // initialize a FAT volume
-  if (!currentDirectory.openRoot(volume)) {PgmPrint("error openRoot"); blink_error(ERROR_SD_INIT);} // open the root directory
+  if (!card.init()) {
+    PgmPrint("error card.init"); 
+    blink_error(ERROR_SD_INIT);
+  } // initialize the SD card
+  if (!volume.init(card)) {
+    PgmPrint("error volume.init"); 
+    blink_error(ERROR_SD_INIT);
+  } // initialize a FAT volume
+  if (!currentDirectory.openRoot(volume)) {
+    PgmPrint("error openRoot"); 
+    blink_error(ERROR_SD_INIT);
+  } // open the root directory
   Serial.print("2");
+
+#if RAM_TESTING
+  PgmPrint("Free RAM post SD init: ");
+  Serial.println(FreeRam());
+#endif
 
   //Search for a config file and load any settings found. This will over-ride previous EEPROM settings if found.
   read_config_file();
@@ -383,7 +453,6 @@ void setup(void)
 
 void loop(void)
 {
-
   //If we are in new log mode, find a new file name to write to
   if(setting_system_mode == MODE_NEWLOG)
     newlog();
@@ -529,15 +598,29 @@ uint8_t append_file(char* file_name)
   UCSR0B |= (1<<RXCIE0); //Enable receive interrupts
   sei(); //Enable interrupts
 
+  //Clear out the Arduino serial buffer
+  Serial.flush();
+
   //Start checking buffer
   //This gets kind of wild. We receive characters up to 115200bps using the UART interrupt
-  //They get stored in one big array 1024 wide. As the array fills, we store half the array (512 bytes)
+  //They get stored in one big array ~800 bytes wide. As the array fills, we store half the array (400 bytes)
   //at a time so that we are storing half the array while the other half is filling.
   while(1){
     uint16_t timeout_counter = 0;
 
+#if BOOTTIME_TESTING
+    boottime = millis(); //Get the time from power on to ready to receive
+    PgmPrint("Time until ready to recieve (ms): ");
+    Serial.println(boottime);
+#endif
+
+#if RAM_TESTING
+  PgmPrint("Free RAM receive ready: ");
+  Serial.println(FreeRam());
+#endif
+
     while(!Serial.available()){ //Wait for characters to come in
-      if(timeout_counter++ > 1000){ //If we haven't seen a character for 5 seconds, then record what is currently in the buffer, sync the SD, and try to shutdown
+      if(timeout_counter++ > 5000){ //If we haven't seen a character for 5 seconds, then record what is currently in the buffer, sync the SD, and try to shutdown
         timeout_counter = 0;
 
         if(checked_spot != 0 && checked_spot != (BUFF_LEN/2)){ //There is unrecorded stuff sitting in the buffer
@@ -566,6 +649,7 @@ uint8_t append_file(char* file_name)
       }
       delay(1); //Hang out for a ms
     }
+    
     input_buffer[read_spot++] = Serial.read(); //Record character to the big buffer
     if(read_spot == BUFF_LEN) read_spot = 0; //Wrap the buffer
     STAT1_PORT ^= (1<<STAT1); //Toggle the STAT1 LED each time we receive a character
@@ -618,7 +702,7 @@ uint8_t append_file(char* file_name)
 
   file.close(); //Done recording, close out the file
 
-    digitalWrite(statled1, LOW); //Turn off indicator LED
+  digitalWrite(statled1, LOW); //Turn off indicator LED
 
 #if DEBUG
   PgmPrintln("Done!");
@@ -978,18 +1062,10 @@ void command_shell(void)
         continue;
 
       //search file in current directory and open it
-      if (file.open(currentDirectory, command_arg, O_READ)) {
-
-        //There may be a better way to discover the size of a file ( file.ls(LS_SIZE); ?), but this works
-        int16_t fileSize = 0;
-        while (file.read() > 0)
-          fileSize++;
-
-        Serial.print(fileSize); //will print 0 if file is empty
-        file.close();
-      }
+      if (file.open(currentDirectory, command_arg, O_READ))
+        Serial.print(file.fileSize());
       else
-        PgmPrint("-1"); //Indicate no file is found
+        PgmPrint("-1"); //Indicate no file is found*/
 
       Serial.println();
     }
@@ -1205,7 +1281,7 @@ void read_system_settings(void)
 
 void print_menu(void)
 {
-  PgmPrintln("OpenLog v2.0");
+  PgmPrintln("OpenLog v2.1");
   PgmPrintln("Available commands:");
   PgmPrintln("new <file>\t\t: Creates <file>");
   PgmPrintln("append <file>\t\t: Appends text to end of <file>. The text is read from the UART in a stream and is not echoed. Finish by sending Ctrl+z (ASCII 26)");
@@ -1366,6 +1442,11 @@ void system_menu(void)
     PgmPrintln("4) Reset new file number");
     PgmPrintln("5) New escape character");
     PgmPrintln("6) Number of escape characters");
+
+#if DEBUG
+    PgmPrintln("a) Clear all user settings");
+#endif
+
     PgmPrintln("x) Exit");
     //print prompt
     Serial.print('>');
@@ -1442,6 +1523,40 @@ void system_menu(void)
       Serial.println(setting_max_escape_character, DEC);
       return;
     }
+
+#if DEBUG
+    //This allows us to reset the EEPROM and config file on a unit to see what would happen to an 
+    //older unit that is upgraded/reflashed to newest firmware
+    if(strcmp_P(command, PSTR("a")) == 0)
+    {
+      EEPROM.write(LOCATION_BAUD_SETTING, 0xFF);
+      EEPROM.write(LOCATION_SYSTEM_SETTING, 0xFF);
+      EEPROM.write(LOCATION_FILE_NUMBER_LSB, 0xFF);
+      EEPROM.write(LOCATION_FILE_NUMBER_MSB, 0xFF);
+      EEPROM.write(LOCATION_ESCAPE_CHAR, 0xFF);
+      EEPROM.write(LOCATION_MAX_ESCAPE_CHAR, 0xFF);
+
+      //Remove the config file if it is there
+      SdFile rootDirectory;
+      if (!rootDirectory.openRoot(volume)) error("openRoot"); // open the root directory
+
+      char configFileName[13];
+      sprintf(configFileName, CFG_FILENAME); //This is the name of the config file. 'config.sys' is probably a bad idea.
+
+      //If there is currently a config file, trash it
+      if (file.open(rootDirectory, configFileName, O_WRITE)) {
+        PgmPrintln("Deleting config");
+        if (!file.remove()){
+          PgmPrintln("Remove config failed"); 
+          return;
+        }
+      }
+
+      PgmPrintln("Unit has been reset. Please power cycle");
+      while(1);
+    }
+#endif
+
     if(strcmp_P(command, PSTR("x")) == 0)
     {
       //Do nothing, just exit
@@ -1982,48 +2097,4 @@ uint8_t wildcmp(const char* wild, const char* string)
 
 //End wildcard functions
 //=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
