@@ -43,6 +43,7 @@ void setup()
 
   delay(1000); //Wait a second for OpenLog to init
 
+  Serial.println(); 
   Serial.println("Run OpenLog Test"); 
 } 
 
@@ -62,23 +63,25 @@ void loop()
       //Print one line of 110 characters with marker in the front (markers go from '!' to '*')
       Serial.print(k, BYTE); //Print the ASCII value directly: ! then " then #, etc
       Serial.println(":abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-!#");
-      delay(50);
+      //delay(50);
   
       //Then print 9 lines of 110 characters with new line at the end of the line
       for(int i = 1 ; i < 10 ; i++)
       {
         Serial.print(i, DEC);
         Serial.println(":abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-!#");
-        delay(50);
+        //delay(50);
       }  
     }
   }
 
-  long totalCharacters = testAmt * 10 * 110;
+  unsigned long totalCharacters = (long)testAmt * 100 * 110;
   
   Serial.print("Characters pushed: ");
-  Serial.print(totalCharacters, DEC);  
-  Serial.println(" - Done!");
+  Serial.println(totalCharacters);  
+  Serial.print("Time taken (s): ");
+  Serial.println(millis()/1000);
+  Serial.println("Done!");
   
   while(1)
   {

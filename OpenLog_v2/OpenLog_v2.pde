@@ -294,6 +294,24 @@
  interrupts without tearing out HardwareSerial.cpp.
  
  Added README to the Test sketch. Added 115200bps to test sketch.
+ 
+ 
+ v2.11
+ Fixed issue 30. I added printing a period ('.') for non-visible ASCII characters during a 'read' command. This cleans up the output a bit. HEX 
+ printing is still available. 
+ 
+ Fixed issue 34. When issuing a long command such as "read log00056.txt 100 200 2" (read from spot 100 to spot 200 and print in HEX), the
+ command shell would die at 24 spots. I increased both the general_buffer and 'buffer' in the command shell from 24 to 30. The limit is now
+ 30 characters, so "read log00056.txt 100 20000 2" is allowed.
+ 
+ Works with a 16GB microSD card! High volume test: loaded 16GB card with 5GB of data. Basic serial tests work. When running at 57600, there
+ is an odd delay. I think it has to do with the file system doing an initial scan for an available cluster. Takes 2-3 seconds before OpenLog
+ returns to normal. This can cause significant data loss.
+ 
+ Fixing power management in v2. Power down after no characters for 3 seconds now works. Unit drops to 2.35mA in sleep. 7.88mA in sitting 
+ RX mode (awake but not receiving anything). There is still a weird bug where the unit comes on at 30mA. After sleep, it comes back at the 
+ correct 7-8mA. Is something not getting shut off?
+
  */
 
 #include "SdFat.h"
@@ -303,6 +321,7 @@
 #include <avr/pgmspace.h> //Needed for strcmp_P - string compare in program space
 #include <ctype.h> //Needed for isdigit
 #include <avr/sleep.h> //Needed for sleep_mode
+#include <avr/power.h> //Needed for powering down perihperals such as the ADC/TWI and Timers
 
 //Debug turns on (1) or off (0) a bunch of verbose debug statements. Normally use (0)
 //#define DEBUG  1
@@ -314,20 +333,21 @@
 //#define BOOTTIME_TESTING 1
 #define BOOTTIME_TESTING 0
 
-//The bigger the receive buffer, the less likely we are to drop characters at high speed. However, the ATmega has a limited amount of RAM.
-//This debug mode allows us to view available RAM at various stages of the program
+//The bigger the receive buffer, the less likely we are to drop characters at high speed. However, the ATmega has a limited amount of
+//RAM. This debug mode allows us to view available RAM at various stages of the program
 //#define RAM_TESTING  1 //On
 #define RAM_TESTING  0 //Off
 
 #define sbi(port, port_pin)   ((port) |= (uint8_t)(1 << port_pin))
 #define cbi(port, port_pin)   ((port) &= (uint8_t)~(1 << port_pin))
 
-//This is the size of the receive buffer. The bigger it is, the less likely we will overflow the buffer while doing a record to SD. But we have limited amounts of RAM (~1100 bytes)
+//This is the size of the receive buffer. The bigger it is, the less likely we will overflow the buffer while doing a record to SD.
+//But we have limited amounts of RAM (~1100 bytes)
 //#define BUFF_LEN 700 //Original v1.6 size. Allowed for 352 free bytes during run time.
 #define BUFF_LEN 800 //New v2 buffer size. 900 fails. 800 works. 
 
 volatile char input_buffer[BUFF_LEN];
-char general_buffer[25];
+char general_buffer[30];
 volatile uint16_t read_spot, checked_spot;
 
 #define CFG_FILENAME	"config.txt"
@@ -378,7 +398,7 @@ byte setting_escape_character; //This is the ASCII character we look for to brea
 byte setting_max_escape_character; //Number of escape chars before break logging, default is 3
 
 #if BOOTTIME_TESTING
-  unsigned long boottime; //Used to keep track of how long it takes to boot
+unsigned long boottime; //Used to keep track of how long it takes to boot
 #endif
 
 //Used for wild card delete and search
@@ -409,6 +429,16 @@ void setup(void)
 {
   pinMode(statled1, OUTPUT);
 
+  //Power down various bits of hardware to lower power usage  
+  set_sleep_mode(SLEEP_MODE_IDLE);
+  sleep_enable();
+  
+  //Shut off TWI, Timer2, Timer1, ADC
+  power_twi_disable();
+  power_timer1_disable();
+  power_timer2_disable();
+  power_adc_disable();
+
   check_emergency_reset(); //Look to see if the RX pin is being pulled low
 
   read_system_settings(); //Load all system settings from EEPROM
@@ -421,7 +451,7 @@ void setup(void)
   if(setting_uart_speed == BAUD_57600) Serial.begin(57600);
   if(setting_uart_speed == BAUD_115200) Serial.begin(115200);
   Serial.print("1");
-  
+
 #if RAM_TESTING
   PgmPrint("Free RAM start: ");
   Serial.println(FreeRam());
@@ -615,12 +645,20 @@ uint8_t append_file(char* file_name)
 #endif
 
 #if RAM_TESTING
-  PgmPrint("Free RAM receive ready: ");
-  Serial.println(FreeRam());
+    PgmPrint("Free RAM receive ready: ");
+    Serial.println(FreeRam());
 #endif
 
+  //Testing to try to get rid of long delay after the first synch
+  //This forces OpenLog to scan the fat table and get the pointers ready before the wave of data starts coming in
+  //currentDirectory.sync();
+  //file.write("123", 3);
+  //file.sync();
+  //file.close();
+  //if (!file.open(currentDirectory, file_name, O_CREAT | O_APPEND | O_WRITE)) error("open1");
+
     while(!Serial.available()){ //Wait for characters to come in
-      if(timeout_counter++ > 5000){ //If we haven't seen a character for 5 seconds, then record what is currently in the buffer, sync the SD, and try to shutdown
+      if(timeout_counter++ > 1200){ //If we haven't seen a character for about 3 seconds, then record what is currently in the buffer, sync the SD, and try to shutdown
         timeout_counter = 0;
 
         if(checked_spot != 0 && checked_spot != (BUFF_LEN/2)){ //There is unrecorded stuff sitting in the buffer
@@ -644,12 +682,12 @@ uint8_t append_file(char* file_name)
         //Now power down until new characters to arrive
         while(!Serial.available()){
           digitalWrite(statled1, LOW); //Turn off stat LED to save power
-          //sleep_mode();
+          sleep_mode(); //Stop everything and go to sleep. Wake up if serial character received
         }
       }
       delay(1); //Hang out for a ms
     }
-    
+
     input_buffer[read_spot++] = Serial.read(); //Record character to the big buffer
     if(read_spot == BUFF_LEN) read_spot = 0; //Wrap the buffer
     STAT1_PORT ^= (1<<STAT1); //Toggle the STAT1 LED each time we receive a character
@@ -702,7 +740,7 @@ uint8_t append_file(char* file_name)
 
   file.close(); //Done recording, close out the file
 
-  digitalWrite(statled1, LOW); //Turn off indicator LED
+    digitalWrite(statled1, LOW); //Turn off indicator LED
 
 #if DEBUG
   PgmPrintln("Done!");
@@ -715,7 +753,7 @@ uint8_t append_file(char* file_name)
 void command_shell(void)
 {
   //provide a simple shell
-  char buffer[24];
+  char buffer[30];
   uint8_t tmp_var;
 
   while(1)
@@ -946,8 +984,15 @@ void command_shell(void)
       int16_t readSpot = 0;
       while ((c = file.read()) > 0) {
         if(++readSpot > readAmount) break;
-        if(printType == 1) 
-          Serial.print((char)c); //Regular ASCII
+        if(printType == 1) { //Printing ASCII
+          //Test character to see if it is visible, if not print '.'
+          if(c >= ' ' && c < 127)
+            Serial.print((char)c); //Regular ASCII
+          else if (c == '\n' || c == '\r')
+            Serial.print((char)c); //Go ahead and print the carriage returns and new lines
+          else
+            Serial.print('.'); //For non visible ASCII characters, print a .
+        }
         else if (printType == 2) {
           Serial.print((char)c, HEX); //Print in HEX
           Serial.print(" ");
@@ -1281,7 +1326,7 @@ void read_system_settings(void)
 
 void print_menu(void)
 {
-  PgmPrintln("OpenLog v2.1");
+  PgmPrintln("OpenLog v2.11");
   PgmPrintln("Available commands:");
   PgmPrintln("new <file>\t\t: Creates <file>");
   PgmPrintln("append <file>\t\t: Appends text to end of <file>. The text is read from the UART in a stream and is not echoed. Finish by sending Ctrl+z (ASCII 26)");
@@ -2097,4 +2142,5 @@ uint8_t wildcmp(const char* wild, const char* string)
 
 //End wildcard functions
 //=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+
 
