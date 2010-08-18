@@ -296,7 +296,10 @@
  Added README to the Test sketch. Added 115200bps to test sketch.
  
  
- v2.11
+ v2.11 Tested with 16GB microSD. Fixed some general bugs. Lowered power consumption.
+ 
+ 26136 bytes out of 30720
+ 
  Fixed issue 30. I added printing a period ('.') for non-visible ASCII characters during a 'read' command. This cleans up the output a bit. HEX 
  printing is still available. 
  
