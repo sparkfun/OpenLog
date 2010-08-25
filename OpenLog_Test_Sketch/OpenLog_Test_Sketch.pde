@@ -38,8 +38,9 @@ void setup()
 { 
   pinMode(ledPin, OUTPUT);     
 
-  Serial.begin(9600); //9600bps is default for OpenLog
+  //Serial.begin(9600); //9600bps is default for OpenLog
   //Serial.begin(57600); //Much faster serial, used for testing buffer overruns on OpenLog
+  Serial.begin(115200); //Much faster serial, used for testing buffer overruns on OpenLog
 
   delay(1000); //Wait a second for OpenLog to init
 

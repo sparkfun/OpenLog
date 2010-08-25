@@ -314,7 +314,21 @@
  Fixing power management in v2. Power down after no characters for 3 seconds now works. Unit drops to 2.35mA in sleep. 7.88mA in sitting 
  RX mode (awake but not receiving anything). There is still a weird bug where the unit comes on at 30mA. After sleep, it comes back at the 
  correct 7-8mA. Is something not getting shut off?
-
+ 
+ 
+ v2.2 Modified append_file() to use a single buffer. Increased HardwareSerial.cpp buffer to 512 bytes.
+ 
+ More testing at 57600. Record times look to be 2, 5, and zero milliseconds when doing a record. This means that the split buffer doesn't
+ really make a difference? There are some records that take 150ms, 14ms, etc. At 57600bps, that's 7200 bytes/s, 138us per byte. With a 150ms
+ pause, that's 1,086 bytes that need to be buffered while we wait... Grrr. Too many.
+ 
+ I re-wrote the append_file function to use only one buffer. This allows us to more quickly pull data from the hardware serial buffer. Hardware 
+ serial buffer has to be increased manually to 512. This file (hardwareserial.cpp) is stored in the Arduino directory. With testing,
+ it seems like recording is working more solidly at 57600bps. But now I'm seeing glitches at 19200bps so more testing is required before we
+ make this the official OpenLog release.
+ 
+ Moved input_buffer into within the append function. Attempting to shave bytes of RAM.
+ 
  */
 
 #include "SdFat.h"
@@ -344,14 +358,7 @@
 #define sbi(port, port_pin)   ((port) |= (uint8_t)(1 << port_pin))
 #define cbi(port, port_pin)   ((port) &= (uint8_t)~(1 << port_pin))
 
-//This is the size of the receive buffer. The bigger it is, the less likely we will overflow the buffer while doing a record to SD.
-//But we have limited amounts of RAM (~1100 bytes)
-//#define BUFF_LEN 700 //Original v1.6 size. Allowed for 352 free bytes during run time.
-#define BUFF_LEN 800 //New v2 buffer size. 900 fails. 800 works. 
-
-volatile char input_buffer[BUFF_LEN];
 char general_buffer[30];
-volatile uint16_t read_spot, checked_spot;
 
 #define CFG_FILENAME	"config.txt"
 
@@ -435,7 +442,7 @@ void setup(void)
   //Power down various bits of hardware to lower power usage  
   set_sleep_mode(SLEEP_MODE_IDLE);
   sleep_enable();
-  
+
   //Shut off TWI, Timer2, Timer1, ADC
   power_twi_disable();
   power_timer1_disable();
@@ -606,6 +613,17 @@ void seqlog(void)
 //Returns 1 on success
 uint8_t append_file(char* file_name)
 {
+  //44051
+  //This is the size of the receive buffer. The bigger it is, the less likely we will overflow the buffer while doing a record to SD.
+  //But we have limited amounts of RAM (~1100 bytes)
+  #define BUFF_LEN 50 //50 works well. Too few and we will call file.write A LOT. Too many and we run out of RAM.
+  //#define BUFF_LEN 400 //Fails horribly for some reason. Oh right, readSpot only goes to 255.
+//#define BUFF_LEN 100 //Works well.
+  char inputBuffer[BUFF_LEN];
+  char escape_chars_received = 0;
+  byte readSpot = 0; //Limited to 255
+  byte incomingByte;
+
   // O_CREAT - create the file if it does not exist
   // O_APPEND - seek to the end of the file prior to each write
   // O_WRITE - open for write
@@ -619,25 +637,12 @@ uint8_t append_file(char* file_name)
   Serial.print('<'); //give a different prompt to indicate no echoing
   digitalWrite(statled1, HIGH); //Turn on indicator LED
 
-  char escape_chars_received = 0;
-  read_spot = 0;
-  checked_spot = 0;
-
-  //Clear circular buffer
-  for(uint16_t i = 0 ; i < BUFF_LEN ; i++)
-    input_buffer[i] = 0;
-
-  //Start UART buffered interrupts
-  UCSR0B |= (1<<RXCIE0); //Enable receive interrupts
-  sei(); //Enable interrupts
-
-  //Clear out the Arduino serial buffer
+  //Clear out the serial buffer
   Serial.flush();
 
-  //Start checking buffer
-  //This gets kind of wild. We receive characters up to 115200bps using the UART interrupt
-  //They get stored in one big array ~800 bytes wide. As the array fills, we store half the array (400 bytes)
-  //at a time so that we are storing half the array while the other half is filling.
+  //Start recording incoming characters
+  //HardwareSerial.cpp has a buffer tied to the interrupt. We increased this buffer to 512 bytes
+  //As characters come in, we read them in and record them to FAT.
   while(1){
     uint16_t timeout_counter = 0;
 
@@ -652,35 +657,30 @@ uint8_t append_file(char* file_name)
     Serial.println(FreeRam());
 #endif
 
-  //Testing to try to get rid of long delay after the first synch
-  //This forces OpenLog to scan the fat table and get the pointers ready before the wave of data starts coming in
-  //currentDirectory.sync();
-  //file.write("123", 3);
-  //file.sync();
-  //file.close();
-  //if (!file.open(currentDirectory, file_name, O_CREAT | O_APPEND | O_WRITE)) error("open1");
+    //Testing to try to get rid of long delay after the first synch
+    //This forces OpenLog to scan the fat table and get the pointers ready before the wave of data starts coming in
+    //currentDirectory.sync();
+    //file.write("123", 3);
+    //file.sync();
+    //file.close();
+    //if (!file.open(currentDirectory, file_name, O_CREAT | O_APPEND | O_WRITE)) error("open1");
 
     while(!Serial.available()){ //Wait for characters to come in
-      if(timeout_counter++ > 1200){ //If we haven't seen a character for about 3 seconds, then record what is currently in the buffer, sync the SD, and try to shutdown
+      if(timeout_counter++ > 1200){ //If we haven't seen a character for about 3 seconds, then record the buffer, sync the SD, and shutdown
         timeout_counter = 0;
 
-        if(checked_spot != 0 && checked_spot != (BUFF_LEN/2)){ //There is unrecorded stuff sitting in the buffer
-          if(checked_spot < (BUFF_LEN/2)){
-            //Record first half the buffer
-            if(file.write((uint8_t*)input_buffer, checked_spot) != checked_spot)
-              PgmPrintln("error writing to file");
-          }
-          else{ //checked_spot > (BUFF_LEN/2)
-            //Record second half the buffer
-            if(file.write((uint8_t*)input_buffer + (BUFF_LEN/2), (checked_spot - (BUFF_LEN/2)) ) != (checked_spot - (BUFF_LEN/2)) )
-              PgmPrintln("error writing to file");
-          }
+        if(readSpot != 0){ //There is unrecorded stuff sitting in the buffer
+          //Record the buffer
+          if(file.write((byte*)inputBuffer, readSpot) != readSpot)
+            PgmPrintln("error writing to file");
         }
-        file.sync(); //Push these new file.writes to the SD card
 
+        file.sync(); //Push these new file.writes to the SD card
+        Serial.flush(); //Clear out the current serial buffer. This is needed if the buffer gets overrun. OpenLog will fail to read the escape character if
+        //the buffer gets borked.
+        
         //Reset the points so that we don't record these freshly recorded characters a 2nd time, when the unit receives more characters
-        read_spot = 0;
-        checked_spot = 0;
+        readSpot = 0;
 
         //Now power down until new characters to arrive
         while(!Serial.available()){
@@ -691,59 +691,43 @@ uint8_t append_file(char* file_name)
       delay(1); //Hang out for a ms
     }
 
-    input_buffer[read_spot++] = Serial.read(); //Record character to the big buffer
-    if(read_spot == BUFF_LEN) read_spot = 0; //Wrap the buffer
-    STAT1_PORT ^= (1<<STAT1); //Toggle the STAT1 LED each time we receive a character
+    incomingByte = Serial.read(); //Grab new character from hardwareserial.cpp buffer (could be 512 bytes)
 
-    if(input_buffer[checked_spot] == setting_escape_character){ //Scan for escape character
-      //Serial.println("ESC!");  
+    //Scan for escape character
+    if(incomingByte == setting_escape_character){
+#if DEBUG
+      Serial.print("!");
+#endif
       if(++escape_chars_received == setting_max_escape_character) break;
     }
-    else{
+    else
       escape_chars_received = 0;
-      //Serial.print("Saw: ");
-      //Serial.println(input_buffer[checked_spot], DEC);
-    }
 
-    checked_spot++;
+    inputBuffer[readSpot++] = incomingByte; //Record character to the local buffer
 
-    if(checked_spot == (BUFF_LEN/2)){ //We've finished checking the first half the buffer
-      //Record first half the buffer
-      if(file.write((uint8_t*)input_buffer, BUFF_LEN/2) != (BUFF_LEN/2)){
+    if(readSpot == BUFF_LEN){ //If we've filled the local small buffer, pass it to the sd write function.
+      //Record the buffer
+      if(file.write((byte*)inputBuffer, BUFF_LEN) != BUFF_LEN){
         PgmPrintln("error writing to file");
         break;
       }
+
+      readSpot = 0; //Wrap the buffer
     }
 
-    if(checked_spot == BUFF_LEN){ //We've finished checking the second half the buffer
-      checked_spot = 0;
-
-      //Record second half the buffer
-      if(file.write((uint8_t*)input_buffer + (BUFF_LEN/2), BUFF_LEN/2) != (BUFF_LEN/2)){
-        PgmPrintln("error writing to file");
-        break;
-      }
-    }
+    STAT1_PORT ^= (1<<STAT1); //Toggle the STAT1 LED each time we receive a character
   } //End while - escape character received or error
 
   //Upon receiving the escape character, we may still have stuff left in the buffer, record the last of the buffer to memory
-  if(checked_spot == 0 || checked_spot == (BUFF_LEN/2)){
-    //Do nothing, we already recorded the buffers right before catching the escape character
-  }
-  else if(checked_spot < (BUFF_LEN/2)){
-    //Record first half the buffer
-    if(file.write((uint8_t*)input_buffer, checked_spot) != checked_spot)
-      PgmPrintln("error writing to file");
-  }
-  else{ //checked_spot > (BUFF_LEN/2)
-    //Record second half the buffer
-    if(file.write((uint8_t*)input_buffer + (BUFF_LEN/2), checked_spot - (BUFF_LEN/2) ) != (checked_spot - (BUFF_LEN/2)))
+  if(readSpot != BUFF_LEN){
+    //Record the buffer
+    if(file.write((byte*)inputBuffer, readSpot) != readSpot)
       PgmPrintln("error writing to file");
   }
 
+  file.sync();
   file.close(); //Done recording, close out the file
-
-    digitalWrite(statled1, LOW); //Turn off indicator LED
+  digitalWrite(statled1, LOW); //Turn off indicator LED
 
 #if DEBUG
   PgmPrintln("Done!");
@@ -1329,7 +1313,7 @@ void read_system_settings(void)
 
 void print_menu(void)
 {
-  PgmPrintln("OpenLog v2.11");
+  PgmPrintln("OpenLog v2.2");
   PgmPrintln("Available commands:");
   PgmPrintln("new <file>\t\t: Creates <file>");
   PgmPrintln("append <file>\t\t: Appends text to end of <file>. The text is read from the UART in a stream and is not echoed. Finish by sending Ctrl+z (ASCII 26)");
@@ -1811,7 +1795,6 @@ void read_config_file(void)
 //If a config file exists, it is trashed and a new one is created
 void record_config_file(void)
 {
-
   //I'm worried that the user may not be in the root directory when modifying config settings. If that is the case,
   //config file will not be found and it will be created in some erroneus directory. The changes to user settings may be lost on the
   //next power cycles. To prevent this, we will open another instance of the file system, then close it down when we are done.
@@ -1880,14 +1863,14 @@ void record_config_file(void)
 
     //Record current system settings to the config file
     //strcpy( (char*)input_buffer, "9600,26,3,0\0");
-    strcpy( (char*)input_buffer, settings_string);
+    strcpy( (char*)general_buffer, settings_string);
 
 #if DEBUG
     PgmPrint("\nSetting string: ");
     Serial.println(settings_string);
 #endif
 
-    if(file.write((uint8_t*)input_buffer, strlen(settings_string)) != strlen(settings_string))
+    if(file.write((uint8_t*)general_buffer, strlen(settings_string)) != strlen(settings_string))
       PgmPrintln("error writing to file");
 
     file.sync(); //Sync all newly written data to card
@@ -2145,5 +2128,9 @@ uint8_t wildcmp(const char* wild, const char* string)
 
 //End wildcard functions
 //=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+
+
+
+
 
 
