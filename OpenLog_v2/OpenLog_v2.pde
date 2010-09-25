@@ -359,7 +359,8 @@
 #define cbi(port, port_pin)   ((port) &= (uint8_t)~(1 << port_pin))
 
 char general_buffer[30];
-
+#define FOLDER_TRACK_DEPTH 15
+char folderTree[FOLDER_TRACK_DEPTH][12];
 #define CFG_FILENAME	"config.txt"
 
 //EEPROM locations for the various user settings
@@ -397,6 +398,16 @@ int statled2 = 13; //This is the SPI LED, indicating SD traffic
 #define ERROR_SD_INIT	3
 #define ERROR_NEW_BAUD	5
 
+// Using OpenLog in an embedded environment
+#define INCLUDE_SIMPLE_EMBEDDED
+#define ECHO			0x01
+#define EXTENDED_INFO		0x02
+#define READABLE_TEXT_ONLY	0x04
+
+#ifdef INCLUDE_SIMPLE_EMBEDDED
+#define EMBEDDED_END_MARKER	0x08
+#endif
+
 Sd2Card card;
 SdVolume volume;
 SdFile currentDirectory;
@@ -418,6 +429,8 @@ struct command_arg
   uint8_t arg_length; // Length of command line argument
 };
 static struct command_arg cmd_arg[MAX_COUNT_COMMAND_LINE_ARGS];
+uint8_t feedback_mode = (ECHO | EXTENDED_INFO);
+
 #define MIN(a,b) ((a)<(b))?(a):(b)
 
 // store error strings in flash to save RAM
@@ -489,6 +502,7 @@ void setup(void)
 
   //Search for a config file and load any settings found. This will over-ride previous EEPROM settings if found.
   read_config_file();
+  memset(folderTree, 0, sizeof(folderTree));
 }
 
 void loop(void)
@@ -507,6 +521,18 @@ void loop(void)
   while(1); //We should never get this far
 }
 
+int8_t getNextFolderTreeIndex()
+{
+  int8_t i;
+  for (i = 0; i < FOLDER_TRACK_DEPTH; i++)
+    if (strlen(folderTree[i]) == 0)
+      return i;
+
+  if (i >= FOLDER_TRACK_DEPTH)
+    i = -1;
+
+  return i;
+}
 //Log to a new file everytime the system boots
 //Checks the spots in EEPROM for the next available LOG# file name
 //Updates EEPROM and then appends to the new log file.
@@ -616,9 +642,9 @@ uint8_t append_file(char* file_name)
   //44051
   //This is the size of the receive buffer. The bigger it is, the less likely we will overflow the buffer while doing a record to SD.
   //But we have limited amounts of RAM (~1100 bytes)
-  #define BUFF_LEN 50 //50 works well. Too few and we will call file.write A LOT. Too many and we run out of RAM.
+#define BUFF_LEN 50 //50 works well. Too few and we will call file.write A LOT. Too many and we run out of RAM.
   //#define BUFF_LEN 400 //Fails horribly for some reason. Oh right, readSpot only goes to 255.
-//#define BUFF_LEN 100 //Works well.
+  //#define BUFF_LEN 100 //Works well.
   char inputBuffer[BUFF_LEN];
   char escape_chars_received = 0;
   byte readSpot = 0; //Limited to 255
@@ -627,7 +653,10 @@ uint8_t append_file(char* file_name)
   // O_CREAT - create the file if it does not exist
   // O_APPEND - seek to the end of the file prior to each write
   // O_WRITE - open for write
-  if (!file.open(currentDirectory, file_name, O_CREAT | O_APPEND | O_WRITE)) error("open1");
+  if (!file.open(currentDirectory, file_name, O_CREAT | O_APPEND | O_WRITE)) {
+    if ((feedback_mode & EXTENDED_INFO) > 0)
+      error("open1");
+  }
 
 #if DEBUG
   PgmPrintln("File open");
@@ -672,13 +701,14 @@ uint8_t append_file(char* file_name)
         if(readSpot != 0){ //There is unrecorded stuff sitting in the buffer
           //Record the buffer
           if(file.write((byte*)inputBuffer, readSpot) != readSpot)
-            PgmPrintln("error writing to file");
+            if ((feedback_mode & EXTENDED_INFO) > 0)
+              PgmPrintln("error writing to file");
         }
 
         file.sync(); //Push these new file.writes to the SD card
         Serial.flush(); //Clear out the current serial buffer. This is needed if the buffer gets overrun. OpenLog will fail to read the escape character if
         //the buffer gets borked.
-        
+
         //Reset the points so that we don't record these freshly recorded characters a 2nd time, when the unit receives more characters
         readSpot = 0;
 
@@ -708,7 +738,8 @@ uint8_t append_file(char* file_name)
     if(readSpot == BUFF_LEN){ //If we've filled the local small buffer, pass it to the sd write function.
       //Record the buffer
       if(file.write((byte*)inputBuffer, BUFF_LEN) != BUFF_LEN){
-        PgmPrintln("error writing to file");
+        if ((feedback_mode & EXTENDED_INFO) > 0)
+          PgmPrintln("error writing to file");
         break;
       }
 
@@ -722,7 +753,8 @@ uint8_t append_file(char* file_name)
   if(readSpot != BUFF_LEN){
     //Record the buffer
     if(file.write((byte*)inputBuffer, readSpot) != readSpot)
-      PgmPrintln("error writing to file");
+      if ((feedback_mode & EXTENDED_INFO) > 0)
+        PgmPrintln("error writing to file");
   }
 
   file.sync();
@@ -743,15 +775,35 @@ void command_shell(void)
   char buffer[30];
   uint8_t tmp_var;
 
-  while(1)
+#ifdef INCLUDE_SIMPLE_EMBEDDED
+  uint32_t file_index;
+  uint8_t command_succedded = 1;
+#endif //INCLUDE_SIMPLE_EMBEDDED
+
+  while(true)
   {
-    //print prompt
+#ifdef INCLUDE_SIMPLE_EMBEDDED
+    if ((feedback_mode & EMBEDDED_END_MARKER) > 0)
+      Serial.print((char)0x1A); // Ctrl+Z ends the data and marks the start of result
+
+    if (command_succedded == 0)
+      Serial.print('!');
+#endif
     Serial.print('>');
 
     //read command
     char* command = buffer;
     if(read_line(command, sizeof(buffer)) < 1)
+    {
+#ifdef INCLUDE_SIMPLE_EMBEDDED
+      command_succedded = 1;
+#endif
       continue;
+    }
+
+#ifdef INCLUDE_SIMPLE_EMBEDDED
+    command_succedded = 0;
+#endif
 
     //Argument 1: The actual command
     char* command_arg = get_cmd_arg(0);
@@ -764,84 +816,77 @@ void command_shell(void)
       //close file system
       currentDirectory.close();
 
-      // initialize the SD card
-      //if (!card.init()) error("card.init");
-
-      // initialize a FAT volume
-      //if (!volume.init(card)) error("volume.init");
-
       // open the root directory
       if (!currentDirectory.openRoot(volume)) error("openRoot");
 
       PgmPrintln("File system initialized");
+#ifdef INCLUDE_SIMPLE_EMBEDDED
+      command_succedded = 1;
+#endif
     }
 
     else if(strcmp_P(command_arg, PSTR("?")) == 0)
     {
       //Print available commands
       print_menu();
+
+#ifdef INCLUDE_SIMPLE_EMBEDDED
+      command_succedded = 1;
+#endif
+
     }
     else if(strcmp_P(command_arg, PSTR("help")) == 0)
     {
       //Print available commands
       print_menu();
+
+#ifdef INCLUDE_SIMPLE_EMBEDDED
+      command_succedded = 1;
+#endif
+
     }
     else if(strcmp_P(command_arg, PSTR("baud")) == 0)
     {
       //Go into baud select menu
       baud_menu();
+
+#ifdef INCLUDE_SIMPLE_EMBEDDED
+      command_succedded = 1;
+#endif
+
     }
     else if(strcmp_P(command_arg, PSTR("set")) == 0)
     {
       //Go into system setting menu
       system_menu();
+
+#ifdef INCLUDE_SIMPLE_EMBEDDED
+      command_succedded = 1;
+#endif
+
     }
 #if DEBUG
     else if(strcmp_P(command_arg, PSTR("create")) == 0)
     {
       //Test for creating the maximum number of files that a directory can hold
       //create_lots_of_files();
+
     }
 #endif
     else if(strcmp_P(command_arg, PSTR("ls")) == 0)
     {
-      PgmPrint("Volume is FAT");
-      Serial.println(volume.fatType(), DEC);
+      if ((feedback_mode & EXTENDED_INFO) > 0)
+      {
+        PgmPrint("Volume is FAT");
+        Serial.println(volume.fatType(), DEC);
+      }
 
-      currentDirectory.ls(LS_SIZE);
+      currentDirectory.ls(LS_SIZE, 0, &wildcmp, get_cmd_arg(1));
 
-      //Original openlog wildcard code
+#ifdef INCLUDE_SIMPLE_EMBEDDED
+      command_succedded = 1;
+#endif
 
-      /*
-      //Argument 2: wild card search
-       command_arg = get_cmd_arg(1);
-       
-       //print directory listing
-       struct fat_dir_entry_struct dir_entry;
-       while(fat_read_dir(dd, &dir_entry))
-       {
-       //Check if we are to do a wild card search
-       tmp_var = (command_arg == 0);
-       if(command_arg != 0)
-       if (wildcmp(command_arg, dir_entry.long_name))
-       tmp_var = 1;
-       
-       //If no arguments list all files, otherwise we only list the files
-       //being matched by the wildcard search
-       if (tmp_var)
-       {
-       uint8_t spaces = sizeof(dir_entry.long_name) - strlen(dir_entry.long_name) + 4;
-       
-       uart_puts(dir_entry.long_name);
-       uart_putc(dir_entry.attributes & FAT_ATTRIB_DIR ? '/' : ' ');
-       while(spaces--)
-       uart_putc(' ');
-       uart_putdw_dec(dir_entry.file_size);
-       uart_putc('\n');
-       }
-       
-       }
-       */
     }
 
     else if(strncmp_P(command_arg, PSTR("md"), 2) == 0)
@@ -857,9 +902,18 @@ void command_shell(void)
 
       SdFile newDirectory;
       if (!newDirectory.makeDir(currentDirectory, command_arg)) {
-        PgmPrintln("error creating directory: ");
-        Serial.println(command_arg);
+        if ((feedback_mode & EXTENDED_INFO) > 0)
+        {
+          PgmPrintln("error creating directory: ");
+          Serial.println(command_arg);
+        }
       }
+#ifdef INCLUDE_SIMPLE_EMBEDDED
+      else
+      {
+        command_succedded = 1;
+      }
+#endif
 
     }
 
@@ -869,41 +923,17 @@ void command_shell(void)
       if (too_many_arguments_error(3, command))
         continue;
 
-      //Argument 2: File name or wildcard removal
-      command_arg = get_cmd_arg(1);
-      if(command_arg == 0)
-        continue;
-
-      if (!file.open(currentDirectory, command_arg, O_WRITE)) {
-        PgmPrint("File not found "); 
-        Serial.println(command_arg);
-        continue;
+      //Argument 2: File name or file wildcard removal
+      uint32_t filesDeleted = currentDirectory.remove(&wildcmp, get_cmd_arg(1), &removeErrorCallback);
+      if ((feedback_mode & EXTENDED_INFO) > 0)
+      {
+        Serial.print(filesDeleted);
+        Serial.println(" file(s) deleted");
       }
-
-      if (!file.remove()){
-        PgmPrint("Remove failed: "); 
-        Serial.println(command_arg);
-      }
-
-      //We don't need to tell the user the file is removed
-      //Serial.print(command_arg);
-      //PgmPrintln(" deleted.");
-
-
-      //Original openlog wildcard code
-
-      /*struct fat_dir_entry_struct file_entry;
-       while(find_file_in_dir(fs, dd, command_arg, &file_entry, 1))
-       {
-       if(!fat_delete_file(fs, &file_entry))
-       {
-       //Some kind of error, but continue anyway
-       PgmPrint("error deleting file: ");
-       uart_puts(command);
-       uart_putc('\n');
-       }
-       }*/
-
+#ifdef INCLUDE_SIMPLE_EMBEDDED
+      if (filesDeleted > 0)
+        command_succedded = 1;
+#endif
     }
 
     else if(strncmp_P(command_arg, PSTR("cd"), 2) == 0)
@@ -918,12 +948,59 @@ void command_shell(void)
         continue;
 
       SdFile subDirectory;
-      if (!subDirectory.open(currentDirectory, command_arg, O_READ)) {
-        PgmPrint("directory not found: ");
-        Serial.println(command_arg);
+
+      //Goto parent directory
+      //@NOTE: This is a fix to make this work. Should be replaced with
+      //proper handling. Limitation: FOLDER_TRACK_DEPTH subfolders
+      if (strncmp_P(command_arg, PSTR(".."), 2) == 0) {
+        tmp_var = 1;
+
+        //close file system
+        currentDirectory.close();
+
+        // open the root directory
+        if (!currentDirectory.openRoot(volume)) error("openRoot");
+        int8_t index = getNextFolderTreeIndex() - 1;
+        if (index >= 0)
+        {
+          for (int8_t iTemp = 0; iTemp < index; iTemp++)
+          {
+            if (!(tmp_var = subDirectory.open(currentDirectory, folderTree[iTemp], O_READ)))
+              break;
+
+            currentDirectory = subDirectory; //Point to new directory
+            subDirectory.close();
+          }
+          memset(folderTree[index], 0, 11);
+        }
+#ifdef INCLUDE_SIMPLE_EMBEDDED
+        command_succedded = tmp_var;
+#endif
+        if (((feedback_mode & EXTENDED_INFO) > 0) && (tmp_var == 0))
+        {
+          PgmPrint("cannot cd to parent directory: ");
+          Serial.println(command_arg);
+        }
+        continue;
+      }
+
+      if (!subDirectory.open(currentDirectory, (char *)command_arg, O_READ)) {
+        if ((feedback_mode & EXTENDED_INFO) > 0)
+        {
+          PgmPrint("directory not found: ");
+          Serial.println(command_arg);
+        }
       }
       else
+      {
         currentDirectory = subDirectory; //Point to new directory
+        int8_t index = getNextFolderTreeIndex();
+        if (index >= 0)
+          strncpy(folderTree[index], command_arg, 11);
+#ifdef INCLUDE_SIMPLE_EMBEDDED
+        command_succedded = 1;
+#endif
+      }
     }
 
     else if(strncmp_P(command_arg, PSTR("read"), 4) == 0)
@@ -935,19 +1012,25 @@ void command_shell(void)
 
       //search file in current directory and open it
       if (!file.open(currentDirectory, command_arg, O_READ)) {
-        PgmPrint("Failed to open file ");
-        Serial.println(command_arg);
+        if ((feedback_mode & EXTENDED_INFO) > 0)
+        {
+          PgmPrint("Failed to open file ");
+          Serial.println(command_arg);
+        }
         continue;
       }
       //Serial.println();
 
       //Argument 3: File seek position
-      if ((command_arg = get_cmd_arg(2)) != 0){
+      if ((command_arg = get_cmd_arg(2)) != 0) {
         if ((command_arg = is_number(command_arg, strlen(command_arg))) != 0) {
           int32_t offset = strtolong(command_arg);
-          if(!file.seekSet(offset)){
-            PgmPrint("Error seeking to ");
-            Serial.println(command_arg);
+          if(!file.seekSet(offset)) {
+            if ((feedback_mode & EXTENDED_INFO) > 0)
+            {
+              PgmPrint("Error seeking to ");
+              Serial.println(command_arg);
+            }
             file.close();
             continue;
           }
@@ -986,8 +1069,12 @@ void command_shell(void)
         }
 
       }
-      Serial.println();
       file.close();
+#ifdef INCLUDE_SIMPLE_EMBEDDED
+      command_succedded = 1;
+      if ((feedback_mode & EMBEDDED_END_MARKER) == 0)
+#endif
+        Serial.println();
     }
 
     else if(strncmp_P(command_arg, PSTR("write"), 5) == 0)
@@ -999,19 +1086,24 @@ void command_shell(void)
 
       //search file in current directory and open it
       if (!file.open(currentDirectory, command_arg, O_WRITE)) {
-        PgmPrint("Failed to open file ");
-        Serial.println(command_arg);
+        if ((feedback_mode & EXTENDED_INFO) > 0)
+        {
+          PgmPrint("Failed to open file ");
+          Serial.println(command_arg);
+        }
         continue;
       }
-      //Serial.println();
 
       //Argument 3: File seek position
       if ((command_arg = get_cmd_arg(2)) != 0){
         if ((command_arg = is_number(command_arg, strlen(command_arg))) != 0) {
           int32_t offset = strtolong(command_arg);
           if(!file.seekSet(offset)) {
-            PgmPrint("Error seeking to ");
-            Serial.println(command_arg);
+            if ((feedback_mode & EXTENDED_INFO) > 0)
+            {
+              PgmPrint("Error seeking to ");
+              Serial.println(command_arg);
+            }
             file.close();
             continue;
           }
@@ -1025,63 +1117,23 @@ void command_shell(void)
 
           //read one line of text
         dataLen = read_line(buffer, sizeof(buffer));
-        if(!dataLen)
+        if(!dataLen) {
+#ifdef INCLUDE_SIMPLE_EMBEDDED
+          command_succedded = 1;
+#endif
           break;
+        }
 
         //write text to file
         if(file.write((uint8_t*) buffer, dataLen) != dataLen) {
-          PgmPrint("error writing to file\n\r");
+          if ((feedback_mode & EXTENDED_INFO) > 0)
+            PgmPrint("error writing to file\n\r");
           break;
         }
       }
 
       file.close();
     }
-
-    //'cat': This command prints the contents of a file in HEX format.
-    //I think this command can be dropped. Hex printing has been added to read function.
-    /*
-    else if(strncmp_P(command_arg, PSTR("cat"), 3) == 0)
-     {
-     //Expecting only 2 arguments
-     if (too_many_arguments_error(2, command))
-     continue;
-     
-     //Argument 2: File name
-     command_arg = get_cmd_arg(1);
-     if(command_arg == 0)
-     continue;
-     
-     //search file in current directory and open it
-     struct fat_file_struct* fd = open_file_in_dir(fs, dd, command_arg);
-     if(!fd)
-     {
-     PgmPrint("error opening ");
-     uart_puts(command_arg);
-     uart_putc('\n');
-     continue;
-     }
-     
-     //print file contents
-     uint8_t buffer[8];
-     uint32_t offset = 0;
-     uint8_t len;
-     while((len = fat_read_file(fd, buffer, sizeof(buffer))) > 0)
-     {
-     uart_putdw_hex(offset);
-     uart_putc(':');
-     for(uint8_t i = 0; i < len; ++i)
-     {
-     uart_putc(' ');
-     uart_putc_hex(buffer[i]);
-     }
-     uart_putc('\n');
-     offset += 8;
-     }
-     fat_close_file(fd);
-     } End cat command */
-
-
     else if(strncmp_P(command_arg, PSTR("size"), 4) == 0)
     {
       //Expecting only 2 arguments
@@ -1094,12 +1146,21 @@ void command_shell(void)
         continue;
 
       //search file in current directory and open it
-      if (file.open(currentDirectory, command_arg, O_READ))
+      if (file.open(currentDirectory, command_arg, O_READ)) {
         Serial.print(file.fileSize());
+#ifdef INCLUDE_SIMPLE_EMBEDDED
+        command_succedded = 1;
+#endif
+      }
       else
-        PgmPrint("-1"); //Indicate no file is found*/
-
-      Serial.println();
+      {
+        if ((feedback_mode & EXTENDED_INFO) > 0)
+          PgmPrint("-1"); //Indicate no file is found*/
+      }
+#ifdef INCLUDE_SIMPLE_EMBEDDED
+      if ((feedback_mode & EMBEDDED_END_MARKER) == 0)
+#endif
+        Serial.println();
     }
 
     else if(strcmp_P(command_arg, PSTR("disk")) == 0)
@@ -1165,16 +1226,20 @@ void command_shell(void)
       //7761920 = 8GB card
       //994816 = 1GB card
       PgmPrintln(" KB");
+#ifdef INCLUDE_SIMPLE_EMBEDDED
+        command_succedded = 1;
+#endif
     }
-
     else if(strcmp_P(command_arg, PSTR("sync")) == 0)
     {
       //Flush all current data and record it to card
       //This isn't really tested.
       file.sync();
       currentDirectory.sync();
+#ifdef INCLUDE_SIMPLE_EMBEDDED
+        command_succedded = 1;
+#endif
     }
-
     else if(strncmp_P(command_arg, PSTR("new"), 3) == 0)
     {
       //Expecting only 2 arguments
@@ -1187,15 +1252,20 @@ void command_shell(void)
         continue;
 
       //Try to open file, if fail (file doesn't exist), then break
-      if (file.open(currentDirectory, command_arg, O_CREAT | O_EXCL | O_WRITE)) //Will fail if file already exsists
+      if (file.open(currentDirectory, command_arg, O_CREAT | O_EXCL | O_WRITE)) {//Will fail if file already exsists
         file.close(); //Everything is good, Close this new file we just opened
+#ifdef INCLUDE_SIMPLE_EMBEDDED
+        command_succedded = 1;
+#endif
+      }
       else
       {
-        PgmPrint("Error creating file: ");
-        Serial.println(command_arg);
+        if ((feedback_mode & EXTENDED_INFO) > 0) {
+          PgmPrint("Error creating file: ");
+          Serial.println(command_arg);
+        }
       }
     }
-
     else if(strncmp_P(command_arg, PSTR("append"), 6) == 0)
     {
       //Expecting only 2 arguments
@@ -1209,13 +1279,90 @@ void command_shell(void)
       if(command_arg == 0)
         continue;
 
-      append_file(command_arg); //Uses circular buffer to capture full stream of text and append to file
+      //append_file: Uses circular buffer to capture full stream of text and append to file
+#ifdef INCLUDE_SIMPLE_EMBEDDED
+      command_succedded = append_file(command_arg);
+#else
+      append_file(command_arg);
+#endif
     }
+    // verbose <on>|<off>
+    else if(strcmp_P(command_arg, PSTR("verbose")) == 0)
+    {
+      //Argument 2: <on>|<off>
+      // Set if we are going to show extended error information when executing commands
+      command_arg = get_cmd_arg(1);
+      if (command_arg != 0)
+      {
+        if ((tmp_var = strcmp_P(command_arg, PSTR("on"))) == 0)
+          feedback_mode |= EXTENDED_INFO;
+        else if ((tmp_var = strcmp_P(command_arg, PSTR("off"))) == 0)
+          feedback_mode &= ((uint8_t)~EXTENDED_INFO);
+#ifdef INCLUDE_SIMPLE_EMBEDDED
+        command_succedded = (tmp_var == 0);
+#endif
+      }
+    }
+#ifdef INCLUDE_SIMPLE_EMBEDDED
+    // eem (Embedded End Marker) <on>|<off>
+    else if(strcmp_P(command_arg, PSTR("eem")) == 0)
+    {
+      //Argument 2: <on>|<off>
+      //Set if we are going to enable char 26 (Ctrl+z) as end-of-data
+      //marker to separate the returned data and the actual
+      //result of the operation
+      command_arg = get_cmd_arg(1);
+      if (command_arg != 0)
+      {
+        if ((tmp_var = strcmp_P(command_arg, PSTR("on"))) == 0)
+          feedback_mode |= EMBEDDED_END_MARKER;
+        else if ((tmp_var = strcmp_P(command_arg, PSTR("off"))) == 0)
+          feedback_mode &= ((uint8_t)~EMBEDDED_END_MARKER);
+
+        command_succedded = (tmp_var == 0);
+      }
+    }
+    // ecountf
+    // returns the number of files in current folder |count|
+    else if(strcmp_P(command_arg, PSTR("efcount")) == 0)
+    {
+      //Argument 2: wild card search
+      command_arg = get_cmd_arg(1);
+      file_index = 0;
+
+      PgmPrint("count|");
+      Serial.println(currentDirectory.fileInfo(FI_COUNT, 0, buffer));
+      command_succedded = 1;
+    }
+    // efname <file index>
+    // Returns the name and the size of a file <name>|<size>
+    else if(strcmp_P(command_arg, PSTR("efinfo")) == 0)
+    {
+      //Argument 2: File index
+      command_arg = get_cmd_arg(1);
+      if (command_arg != 0)
+      {
+        // File index should always be a number
+        if ((command_arg = is_number(command_arg, strlen(command_arg))) != 0)
+        {
+          file_index = strtolong(command_arg);
+          memset(buffer, 0, sizeof(buffer));
+          uint32_t size = currentDirectory.fileInfo(FI_INFO, file_index, buffer);
+          Serial.print(buffer);
+          Serial.print('|');
+          Serial.println(size);
+          command_succedded = 1;
+        }
+      }
+    }
+#endif //INCLUDE_SIMPLE_EMBEDDED
 
     else
     {
-      PgmPrint("unknown command: ");
-      Serial.println(command_arg);
+      if ((feedback_mode & EXTENDED_INFO) > 0) {
+        PgmPrint("unknown command: ");
+        Serial.println(command_arg);
+      }
     }
   }
 
@@ -1323,7 +1470,6 @@ void print_menu(void)
   PgmPrintln("cd <directory>\t\t: Changes current working directory to <directory>");
   PgmPrintln("cd ..\t\t: Changes to lower directory in tree");
   PgmPrintln("ls\t\t\t: Shows the content of the current directory. Use wildcard to do a wildcard listing of files in current directory");
-  //PgmPrintln("cat <file>\t\t: Writes a hexdump of <file> to the terminal");
   PgmPrintln("read <file> <start> <length> <type>\t\t: Writes ASCII <length> parts of <file> to the terminal starting at <start>. Omit <start> and <length> to read whole file. <type> 1 prints in ASCII, 2 in HEX.");
   PgmPrintln("size <file>\t\t: Write size of file to terminal");
   PgmPrintln("disk\t\t\t: Shows card manufacturer, status, filesystem capacity and free storage space");
@@ -2080,7 +2226,11 @@ char* is_number(char* buffer, uint8_t buffer_length)
 
   return buffer;
 }
-
+void removeErrorCallback(const char* fileName)
+{
+  Serial.print((char *)PSTR("Remove failed: "));
+  Serial.println(fileName);
+}
 //Wildcard string compare.
 //Written by Jack Handy - jakkhandy@hotmail.com
 //http://www.codeproject.com/KB/string/wildcmp.aspx
@@ -2128,9 +2278,4 @@ uint8_t wildcmp(const char* wild, const char* string)
 
 //End wildcard functions
 //=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
-
-
-
-
-
 
