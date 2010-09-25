@@ -47,6 +47,12 @@ class SdVolume;
 /** ls() flag for recursive list of subdirectories */
 #define LS_R 4
 
+// flags for fileInfo
+/** fileInfo() return the number of files in the current directory */
+#define FI_COUNT 1
+/** fileInfo() return the size and the file name */
+#define FI_INFO 2
+
 // use the gnu style oflag in open()
 /** open() oflag for reading */
 #define O_READ    0X01
@@ -150,6 +156,7 @@ class SdFile {
   uint32_t fileSize_;     // file size in bytes
   uint32_t firstCluster_; // first cluster of file
   SdVolume *vol_;         // volume where file is located
+  char     buff[14];      // temporary buffer, used for file operations. (8.3 format: 8+1+3+\n+\0=14 chars)
   
   // private functions
   uint8_t addCluster(void);
@@ -233,7 +240,8 @@ public:
   /** \return True if this is a SdFile for the root directory. */
   uint8_t isRoot(void) {
     return type_ == FAT_FILE_TYPE_ROOT16 || type_ == FAT_FILE_TYPE_ROOT32;}
-  void ls(uint8_t flags = 0, uint8_t indent = 0);
+  void ls(uint8_t flags = 0, uint8_t indent = 0, uint8_t (*compare)(const char* wild, const char* string) = 0, char *wildcard = 0);
+  uint32_t fileInfo(uint8_t flags, uint32_t index, char* fileName);
   uint8_t makeDir(SdFile &dir, char *dirName);
   uint8_t open(SdFile &dirFile, uint16_t index, uint8_t oflag);
   uint8_t open(SdFile &dirFile, char *fileName, uint8_t oflag);
@@ -254,6 +262,7 @@ public:
   int16_t read(void) {uint8_t b; return read(&b, 1) == 1 ? b : -1;}
   int16_t read(void *buf, uint16_t nbyte);
   int8_t readDir(dir_t &dir);
+  uint32_t remove(uint8_t (*compare)(const char* wild, const char* string), char *wildcard, void (*error)(const char* file));
   static uint8_t remove(SdFile &dirFile, char *fileName);
   uint8_t remove(void);
   /** Set the file's current position to zero. */
