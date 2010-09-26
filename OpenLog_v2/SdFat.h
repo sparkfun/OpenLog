@@ -305,6 +305,10 @@ public:
   void write(const char *str);
   void write_P(PGM_P str);
   void writeln_P(PGM_P str);
+private:
+  void ls(uint8_t flags, uint8_t indent, uint8_t (*compare)(const char* wild, const char* string), char *wildcard, uint8_t (*dirType)(dir_t &dir));
+  static uint8_t isFile(dir_t &dir) {return DIR_IS_FILE(dir);};
+  static uint8_t isSubDir(dir_t &dir) {return DIR_IS_SUBDIR(dir);};
 };
 //==============================================================================
 // SdVolume class
