@@ -769,6 +769,60 @@ uint8_t append_file(char* file_name)
   return(1); //Success!
 }
 
+uint8_t gotoDir(char *dir)
+{
+  SdFile subDirectory;
+  uint8_t tmp_var = 0;
+
+  //Goto parent directory
+  //@NOTE: This is a fix to make this work. Should be replaced with
+  //proper handling. Limitation: FOLDER_TRACK_DEPTH subfolders
+  if (strncmp_P(dir, PSTR(".."), 2) == 0) {
+    tmp_var = 1;
+
+    //close file system
+    currentDirectory.close();
+
+    // open the root directory
+    if (!currentDirectory.openRoot(volume)) error("openRoot");
+    int8_t index = getNextFolderTreeIndex() - 1;
+    if (index >= 0)
+    {
+      for (int8_t iTemp = 0; iTemp < index; iTemp++)
+      {
+        if (!(tmp_var = subDirectory.open(currentDirectory, folderTree[iTemp], O_READ)))
+          break;
+
+        currentDirectory = subDirectory; //Point to new directory
+        subDirectory.close();
+      }
+      memset(folderTree[index], 0, 11);
+    }
+    if (((feedback_mode & EXTENDED_INFO) > 0) && (tmp_var == 0))
+    {
+      PgmPrint("cannot cd to parent directory: ");
+      Serial.println(dir);
+    }
+  }
+  else
+  {
+    if (!(tmp_var = subDirectory.open(currentDirectory, dir, O_READ))) {
+      if ((feedback_mode & EXTENDED_INFO) > 0)
+      {
+        PgmPrint("directory not found: ");
+        Serial.println(dir);
+      }
+    }
+    else
+    {
+      currentDirectory = subDirectory; //Point to new directory
+      int8_t index = getNextFolderTreeIndex();
+      if (index >= 0)
+        strncpy(folderTree[index], dir, 11);
+    }
+  }
+  return tmp_var;
+}
 void command_shell(void)
 {
   //provide a simple shell
@@ -923,6 +977,29 @@ void command_shell(void)
       if (too_many_arguments_error(3, command))
         continue;
 
+      //Argument 2: Directory name
+      command_arg = get_cmd_arg(1);
+      if(command_arg == 0)
+        continue;
+
+      //Remove empty folder.
+      //@NOTE: Unfortunately -rf does not work due to a buggy rmRfStar() function.
+      //Calling rmRfStart() will result in OpenLog rebooting.
+      if (strncmp_P(command_arg, PSTR("-f"), 2) == 0)
+      {
+        if (file.open(currentDirectory, command_arg, O_READ))
+          file.close(); //There is a file called "-f"
+        else
+        {
+          //remove and goto parent directory
+          if (currentDirectory.rmDir()) gotoDir("..");
+#ifdef INCLUDE_SIMPLE_EMBEDDED
+          command_succedded = 1;
+#endif
+          continue;
+        }
+      }
+
       //Argument 2: File name or file wildcard removal
       uint32_t filesDeleted = currentDirectory.remove(&wildcmp, get_cmd_arg(1), &removeErrorCallback);
       if ((feedback_mode & EXTENDED_INFO) > 0)
@@ -946,61 +1023,12 @@ void command_shell(void)
       command_arg = get_cmd_arg(1);
       if(command_arg == 0)
         continue;
+      //open directory
+      tmp_var = gotoDir(command_arg);
 
-      SdFile subDirectory;
-
-      //Goto parent directory
-      //@NOTE: This is a fix to make this work. Should be replaced with
-      //proper handling. Limitation: FOLDER_TRACK_DEPTH subfolders
-      if (strncmp_P(command_arg, PSTR(".."), 2) == 0) {
-        tmp_var = 1;
-
-        //close file system
-        currentDirectory.close();
-
-        // open the root directory
-        if (!currentDirectory.openRoot(volume)) error("openRoot");
-        int8_t index = getNextFolderTreeIndex() - 1;
-        if (index >= 0)
-        {
-          for (int8_t iTemp = 0; iTemp < index; iTemp++)
-          {
-            if (!(tmp_var = subDirectory.open(currentDirectory, folderTree[iTemp], O_READ)))
-              break;
-
-            currentDirectory = subDirectory; //Point to new directory
-            subDirectory.close();
-          }
-          memset(folderTree[index], 0, 11);
-        }
 #ifdef INCLUDE_SIMPLE_EMBEDDED
         command_succedded = tmp_var;
 #endif
-        if (((feedback_mode & EXTENDED_INFO) > 0) && (tmp_var == 0))
-        {
-          PgmPrint("cannot cd to parent directory: ");
-          Serial.println(command_arg);
-        }
-        continue;
-      }
-
-      if (!subDirectory.open(currentDirectory, (char *)command_arg, O_READ)) {
-        if ((feedback_mode & EXTENDED_INFO) > 0)
-        {
-          PgmPrint("directory not found: ");
-          Serial.println(command_arg);
-        }
-      }
-      else
-      {
-        currentDirectory = subDirectory; //Point to new directory
-        int8_t index = getNextFolderTreeIndex();
-        if (index >= 0)
-          strncpy(folderTree[index], command_arg, 11);
-#ifdef INCLUDE_SIMPLE_EMBEDDED
-        command_succedded = 1;
-#endif
-      }
     }
 
     else if(strncmp_P(command_arg, PSTR("read"), 4) == 0)
@@ -1227,7 +1255,7 @@ void command_shell(void)
       //994816 = 1GB card
       PgmPrintln(" KB");
 #ifdef INCLUDE_SIMPLE_EMBEDDED
-        command_succedded = 1;
+      command_succedded = 1;
 #endif
     }
     else if(strcmp_P(command_arg, PSTR("sync")) == 0)
@@ -1237,7 +1265,7 @@ void command_shell(void)
       file.sync();
       currentDirectory.sync();
 #ifdef INCLUDE_SIMPLE_EMBEDDED
-        command_succedded = 1;
+      command_succedded = 1;
 #endif
     }
     else if(strncmp_P(command_arg, PSTR("new"), 3) == 0)
@@ -2278,4 +2306,3 @@ uint8_t wildcmp(const char* wild, const char* string)
 
 //End wildcard functions
 //=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
-

@@ -233,25 +233,7 @@ uint32_t SdFile::fileInfo(uint8_t flags, uint32_t index, char* fileName)
 
   return val;
 }
-//------------------------------------------------------------------------------
-/** List directory contents to Serial.
- *
- * \param[in] flags The inclusive OR of
- *
- * LS_DATE - %Print file modification date
- *
- * LS_SIZE - %Print file size.
- *
- * LS_R - Recursive list of subdirectories.
- *
- * \param[in] indent Amount of space before file name. Used for recursive
- * list to indicate subdirectory level.
- * \param[in] compare String comparison function. The function shall
- * \param[in] wildcard String to compare.
- * return 0 if strings are equal.
- *
- */
-void SdFile::ls(uint8_t flags, uint8_t indent, uint8_t (*compare)(const char* wild, const char* string), char *wildcard)
+void SdFile::ls(uint8_t flags, uint8_t indent, uint8_t (*compare)(const char* wild, const char* string), char *wildcard, uint8_t (*dirType)(dir_t &dir))
 {
   dir_t *p;
 
@@ -265,7 +247,7 @@ void SdFile::ls(uint8_t flags, uint8_t indent, uint8_t (*compare)(const char* wi
     if (p->name[0] == DIR_NAME_DELETED || p->name[0] == '.') continue;
 
     // only list subdirectories and files
-    if (!DIR_IS_FILE_OR_SUBDIR(*p)) continue;
+    if (!(*dirType)(*p)) continue;
 
     // check if we are to do a wild card comparison of the file name.
     // for example: "ls *h.txt". The "*compare" function is provided by the
@@ -304,6 +286,29 @@ void SdFile::ls(uint8_t flags, uint8_t indent, uint8_t (*compare)(const char* wi
       seekSet(32*(index + 1));
     }
   }
+}
+//------------------------------------------------------------------------------
+/** List directory contents to Serial.
+ *
+ * \param[in] flags The inclusive OR of
+ *
+ * LS_DATE - %Print file modification date
+ *
+ * LS_SIZE - %Print file size.
+ *
+ * LS_R - Recursive list of subdirectories.
+ *
+ * \param[in] indent Amount of space before file name. Used for recursive
+ * list to indicate subdirectory level.
+ * \param[in] compare String comparison function. The function shall
+ * \param[in] wildcard String to compare.
+ * return 0 if strings are equal.
+ *
+ */
+void SdFile::ls(uint8_t flags, uint8_t indent, uint8_t (*compare)(const char* wild, const char* string), char *wildcard)
+{
+  ls(flags, indent, compare, wildcard, SdFile::isSubDir);  // Show only directories
+  ls(flags, indent, compare, wildcard, SdFile::isFile);    // Show only files
 }
 //------------------------------------------------------------------------------
 // format directory name field from a 8.3 name string
