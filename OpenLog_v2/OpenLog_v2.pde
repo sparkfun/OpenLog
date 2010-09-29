@@ -329,6 +329,28 @@
  
  Moved input_buffer into within the append function. Attempting to shave bytes of RAM.
  
+ 
+ v2.21 ringp fork brought in. Wildcard remove and list commands now work. Remove directory now works! Change directory up/down the tree works again.
+ 
+ 28440 bytes used of 30720.
+ 
+ ringp brought back many great commands! Thanks ringp!
+ rm LOG*.* works
+ ls *.TXT works
+ cd .. works again
+ ls now correctly shows directories first and files following the directories.
+ 
+ To remove a directory, you have to navigate into that directory. For example:
+ >cd TEMP (you are now in TEMP directory)
+ >rm -f TEMP (you are now removing TEMP, and you will be pushed back down one level of the tree)
+ >ls (shows files and directories where TEMP directory used to be, but TEMP directory should be gone)
+ 
+ ringp added new commands:
+ efcount: gives the number of files in the current directory. Example: "efcount" returns "count|3". There are 3 files in the current directory.
+ efinfo <spot>: gives info about the file in <spot>. Example: "efinfo 2" reports "LOG00588.TXT|45". File number 2 is named LOG00588.TXT and is 45 bytes in size.
+ verbose <"on"|"off">: sets whether command errors are verbose (long winded) or just the "!" character. Example: "verbose off" sets verbose off. Then if a 
+ command like "blah" is received, then only "!>" is seen from the command line interface. This makes it easier for embedded systems to recognize there 
+ was an error. This setting is not recorded to EEPROM.
  */
 
 #include "SdFat.h"
@@ -1350,7 +1372,7 @@ void command_shell(void)
         command_succedded = (tmp_var == 0);
       }
     }
-    // ecountf
+    // efcount
     // returns the number of files in current folder |count|
     else if(strcmp_P(command_arg, PSTR("efcount")) == 0)
     {
@@ -1362,7 +1384,7 @@ void command_shell(void)
       Serial.println(currentDirectory.fileInfo(FI_COUNT, 0, buffer));
       command_succedded = 1;
     }
-    // efname <file index>
+    // efinfo <file index>
     // Returns the name and the size of a file <name>|<size>
     else if(strcmp_P(command_arg, PSTR("efinfo")) == 0)
     {
@@ -1488,7 +1510,7 @@ void read_system_settings(void)
 
 void print_menu(void)
 {
-  PgmPrintln("OpenLog v2.2");
+  PgmPrintln("OpenLog v2.21");
   PgmPrintln("Available commands:");
   PgmPrintln("new <file>\t\t: Creates <file>");
   PgmPrintln("append <file>\t\t: Appends text to end of <file>. The text is read from the UART in a stream and is not echoed. Finish by sending Ctrl+z (ASCII 26)");
