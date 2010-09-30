@@ -1004,17 +1004,17 @@ void command_shell(void)
       if(command_arg == 0)
         continue;
 
-      //Remove empty folder.
-      //@NOTE: Unfortunately -rf does not work due to a buggy rmRfStar() function.
-      //Calling rmRfStart() will result in OpenLog rebooting.
-      if (strncmp_P(command_arg, PSTR("-f"), 2) == 0)
+      //Removing an empty folder "rm -f".
+      //Removing non-empty folder and all subfolders "rm -rf".
+      tmp_var = 1;
+      if (strncmp_P(command_arg, PSTR("-f"), 2) == 0 || (tmp_var = strncmp_P(command_arg, PSTR("-rf"), 3)) == 0)
       {
         if (file.open(currentDirectory, command_arg, O_READ))
-          file.close(); //There is a file called "-f"
+          file.close(); //There is a file called "-f" or "-rf" so remove the file
         else
         {
           //remove and goto parent directory
-          if (currentDirectory.rmDir()) gotoDir("..");
+          if ((tmp_var == 0) ? currentDirectory.rmRfStar() : currentDirectory.rmDir()) gotoDir("..");
 #ifdef INCLUDE_SIMPLE_EMBEDDED
           command_succedded = 1;
 #endif

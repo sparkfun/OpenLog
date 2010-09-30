@@ -1042,7 +1042,7 @@ uint8_t SdFile::rmRfStar(void)
     if (!f.open(*this, index, O_READ)) return false;
     if (f.isSubDir()) {
       // recursively delete
-      return rmRfStar();
+      if (!f.rmRfStar()) return false;
     }
     else {
       // ignore read-only
