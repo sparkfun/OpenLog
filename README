@@ -19,4 +19,5 @@ v1.6 Added ability to configure via config.txt file.
 v2.0 Massive overhaul. Ported to sdfatlib. Now supports FAT16/FAT32/SD/SDHC.
 v2.1 Power save not working. Fixed issue 35. Dropping characters at 57600bps.
 v2.11 Tested with 16GB microSD. Fixed issues 30 & 34. Re-enable power save.
-
+v2.2 Modified append_file() to use a single buffer. Increased HardwareSerial.cpp buffer to 512 bytes.
+v2.21 ringp fork brought in. rm dir, cd .., and wildcards now work!
