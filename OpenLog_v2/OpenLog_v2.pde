@@ -684,6 +684,10 @@ uint8_t append_file(char* file_name)
   PgmPrintln("File open");
   PgmPrintln("Recording");
 #endif
+#ifdef INCLUDE_SIMPLE_EMBEDDED
+  if ((feedback_mode & EMBEDDED_END_MARKER) > 0)
+    Serial.print((char)0x1A); // Ctrl+Z ends the data and marks the start of result
+#endif
 
   Serial.print('<'); //give a different prompt to indicate no echoing
   digitalWrite(statled1, HIGH); //Turn on indicator LED
@@ -887,15 +891,17 @@ void command_shell(void)
     //execute command
     if(strcmp_P(command_arg, PSTR("init")) == 0)
     {
-      PgmPrintln("Closing down file system");
+      if ((feedback_mode & EXTENDED_INFO) > 0)
+        PgmPrintln("Closing down file system");
 
       //close file system
       currentDirectory.close();
 
       // open the root directory
       if (!currentDirectory.openRoot(volume)) error("openRoot");
-
-      PgmPrintln("File system initialized");
+      memset(folderTree, 0, sizeof(folderTree));
+      if ((feedback_mode & EXTENDED_INFO) > 0)
+        PgmPrintln("File system initialized");
 #ifdef INCLUDE_SIMPLE_EMBEDDED
       command_succedded = 1;
 #endif
@@ -964,13 +970,8 @@ void command_shell(void)
 #endif
 
     }
-
     else if(strncmp_P(command_arg, PSTR("md"), 2) == 0)
     {
-      //Expecting only 2 arguments
-      if (too_many_arguments_error(2, command))
-        continue;
-
       //Argument 2: Directory name
       command_arg = get_cmd_arg(1);
       if(command_arg == 0)
@@ -992,37 +993,52 @@ void command_shell(void)
 #endif
 
     }
-
+    //NOTE on using "rm <option>/<file> <subfolder>"
+    // "rm -rf <subfolder>" removes the <subfolder> and all contents recursively
+    // "rm <subfolder>" removes the <subfolder> only if its empty
+    // "rm <filename>" removes the <filename>
     else if(strncmp_P(command_arg, PSTR("rm"), 2) == 0)
     {
-      //Expecting max 3 arguments
-      if (too_many_arguments_error(3, command))
-        continue;
-
-      //Argument 2: Directory name
+      //Argument 2: Remove option or file name/subdirectory to remove
       command_arg = get_cmd_arg(1);
       if(command_arg == 0)
         continue;
 
-      //Removing an empty folder "rm -f".
-      //Removing non-empty folder and all subfolders "rm -rf".
-      tmp_var = 1;
-      if (strncmp_P(command_arg, PSTR("-f"), 2) == 0 || (tmp_var = strncmp_P(command_arg, PSTR("-rf"), 3)) == 0)
+      //Argument 2: Remove subfolder recursively?
+      if ((count_cmd_args() == 3) && (strncmp_P(command_arg, PSTR("-rf"), 3) == 0))
       {
-        if (file.open(currentDirectory, command_arg, O_READ))
-          file.close(); //There is a file called "-f" or "-rf" so remove the file
-        else
+        //Remove the subfolder
+        if (file.open(currentDirectory, get_cmd_arg(2), O_READ))
         {
-          //remove and goto parent directory
-          if ((tmp_var == 0) ? currentDirectory.rmRfStar() : currentDirectory.rmDir()) gotoDir("..");
+          tmp_var = file.rmRfStar();
+          file.close();
 #ifdef INCLUDE_SIMPLE_EMBEDDED
-          command_succedded = 1;
+          command_succedded = tmp_var;
 #endif
-          continue;
         }
+        continue;
       }
 
-      //Argument 2: File name or file wildcard removal
+      //Argument 2: Remove subfolder if empty or remove file
+      if (file.open(currentDirectory, command_arg, O_READ))
+      {
+        tmp_var = 0;
+        if (file.isDir() || file.isSubDir())
+          tmp_var = file.rmDir();
+        else
+        {
+          file.close();
+          if (file.open(currentDirectory, command_arg, O_WRITE))
+            tmp_var = file.remove();
+        }
+#ifdef INCLUDE_SIMPLE_EMBEDDED
+        command_succedded = tmp_var;
+#endif
+        file.close();
+        continue;
+      }
+
+      //Argument 2: File wildcard removal
       uint32_t filesDeleted = currentDirectory.remove(&wildcmp, get_cmd_arg(1), &removeErrorCallback);
       if ((feedback_mode & EXTENDED_INFO) > 0)
       {
@@ -1034,25 +1050,20 @@ void command_shell(void)
         command_succedded = 1;
 #endif
     }
-
     else if(strncmp_P(command_arg, PSTR("cd"), 2) == 0)
     {
-      //Expecting only 2 arguments
-      if (too_many_arguments_error(2, command))
-        continue;
-
       //Argument 2: Directory name
       command_arg = get_cmd_arg(1);
       if(command_arg == 0)
         continue;
+
       //open directory
       tmp_var = gotoDir(command_arg);
 
 #ifdef INCLUDE_SIMPLE_EMBEDDED
-        command_succedded = tmp_var;
+      command_succedded = tmp_var;
 #endif
     }
-
     else if(strncmp_P(command_arg, PSTR("read"), 4) == 0)
     {
       //Argument 2: File name
@@ -1069,7 +1080,6 @@ void command_shell(void)
         }
         continue;
       }
-      //Serial.println();
 
       //Argument 3: File seek position
       if ((command_arg = get_cmd_arg(2)) != 0) {
@@ -1126,7 +1136,6 @@ void command_shell(void)
 #endif
         Serial.println();
     }
-
     else if(strncmp_P(command_arg, PSTR("write"), 5) == 0)
     {
       //Argument 2: File name
@@ -1162,7 +1171,11 @@ void command_shell(void)
 
       //read text from the shell and write it to the file
       uint8_t dataLen;
-      while(1) {    
+      while(1) {
+#ifdef INCLUDE_SIMPLE_EMBEDDED
+        if ((feedback_mode & EMBEDDED_END_MARKER) > 0)
+          Serial.print((char)0x1A); // Ctrl+Z ends the data and marks the start of result
+#endif
         Serial.print("<"); //give a different prompt
 
           //read one line of text
@@ -1186,10 +1199,6 @@ void command_shell(void)
     }
     else if(strncmp_P(command_arg, PSTR("size"), 4) == 0)
     {
-      //Expecting only 2 arguments
-      if (too_many_arguments_error(2, command))
-        continue;
-
       //Argument 2: File name - no wildcard search
       command_arg = get_cmd_arg(1);
       if(command_arg == 0)
@@ -1198,6 +1207,7 @@ void command_shell(void)
       //search file in current directory and open it
       if (file.open(currentDirectory, command_arg, O_READ)) {
         Serial.print(file.fileSize());
+        file.close();
 #ifdef INCLUDE_SIMPLE_EMBEDDED
         command_succedded = 1;
 #endif
@@ -1212,7 +1222,6 @@ void command_shell(void)
 #endif
         Serial.println();
     }
-
     else if(strcmp_P(command_arg, PSTR("disk")) == 0)
     {
       //Print card type
@@ -1292,10 +1301,6 @@ void command_shell(void)
     }
     else if(strncmp_P(command_arg, PSTR("new"), 3) == 0)
     {
-      //Expecting only 2 arguments
-      if (too_many_arguments_error(2, command))
-        continue;
-
       //Argument 2: File name
       command_arg = get_cmd_arg(1);
       if(command_arg == 0)
@@ -1318,10 +1323,6 @@ void command_shell(void)
     }
     else if(strncmp_P(command_arg, PSTR("append"), 6) == 0)
     {
-      //Expecting only 2 arguments
-      if (too_many_arguments_error(2, command))
-        continue;
-
       //Argument 2: File name
       //Find the end of a current file and begins writing to it
       //Ends only when the user inputs Ctrl+z (ASCII 26)
@@ -1336,17 +1337,49 @@ void command_shell(void)
       append_file(command_arg);
 #endif
     }
+    else if(strncmp_P(command_arg, PSTR("pwd"), 3) == 0)
+    {
+      Serial.print(".\\");
+      tmp_var = getNextFolderTreeIndex();
+      for (uint8_t i = 0; i < tmp_var; i++)
+      {
+        Serial.print(folderTree[i]);
+        if (i < tmp_var-1) Serial.print("\\");
+      }
+      Serial.println("");
+#ifdef INCLUDE_SIMPLE_EMBEDDED
+      command_succedded = 1;
+#endif
+    }
+    // echo <on>|<off>
+    else if(strncmp_P(command_arg, PSTR("echo"), 4) == 0)
+    {
+      //Argument 2: <on>|<off>
+      // Set if we are going to echo the characters back to the client or not
+      command_arg = get_cmd_arg(1);
+      if (command_arg != 0)
+      {
+        if ((tmp_var = strncmp_P(command_arg, PSTR("on"), 2)) == 0)
+          feedback_mode |= ECHO;
+        else if ((tmp_var = strncmp_P(command_arg, PSTR("off"), 3)) == 0)
+          feedback_mode &= ((uint8_t)~ECHO);
+
+#ifdef INCLUDE_SIMPLE_EMBEDDED
+        command_succedded = (tmp_var == 0);
+#endif
+      }
+    }
     // verbose <on>|<off>
-    else if(strcmp_P(command_arg, PSTR("verbose")) == 0)
+    else if(strncmp_P(command_arg, PSTR("verbose"), 7) == 0)
     {
       //Argument 2: <on>|<off>
       // Set if we are going to show extended error information when executing commands
       command_arg = get_cmd_arg(1);
       if (command_arg != 0)
       {
-        if ((tmp_var = strcmp_P(command_arg, PSTR("on"))) == 0)
+        if ((tmp_var = strncmp_P(command_arg, PSTR("on"), 2)) == 0)
           feedback_mode |= EXTENDED_INFO;
-        else if ((tmp_var = strcmp_P(command_arg, PSTR("off"))) == 0)
+        else if ((tmp_var = strncmp_P(command_arg, PSTR("off"), 3)) == 0)
           feedback_mode &= ((uint8_t)~EXTENDED_INFO);
 #ifdef INCLUDE_SIMPLE_EMBEDDED
         command_succedded = (tmp_var == 0);
@@ -1355,7 +1388,7 @@ void command_shell(void)
     }
 #ifdef INCLUDE_SIMPLE_EMBEDDED
     // eem (Embedded End Marker) <on>|<off>
-    else if(strcmp_P(command_arg, PSTR("eem")) == 0)
+    else if(strncmp_P(command_arg, PSTR("eem"), 3) == 0)
     {
       //Argument 2: <on>|<off>
       //Set if we are going to enable char 26 (Ctrl+z) as end-of-data
@@ -1364,9 +1397,9 @@ void command_shell(void)
       command_arg = get_cmd_arg(1);
       if (command_arg != 0)
       {
-        if ((tmp_var = strcmp_P(command_arg, PSTR("on"))) == 0)
+        if ((tmp_var = strncmp_P(command_arg, PSTR("on"), 2)) == 0)
           feedback_mode |= EMBEDDED_END_MARKER;
-        else if ((tmp_var = strcmp_P(command_arg, PSTR("off"))) == 0)
+        else if ((tmp_var = strncmp_P(command_arg, PSTR("off"), 3)) == 0)
           feedback_mode &= ((uint8_t)~EMBEDDED_END_MARKER);
 
         command_succedded = (tmp_var == 0);
@@ -1374,7 +1407,7 @@ void command_shell(void)
     }
     // ecountf
     // returns the number of files in current folder |count|
-    else if(strcmp_P(command_arg, PSTR("efcount")) == 0)
+    else if(strncmp_P(command_arg, PSTR("efcount"), 7) == 0)
     {
       //Argument 2: wild card search
       command_arg = get_cmd_arg(1);
@@ -1386,7 +1419,7 @@ void command_shell(void)
     }
     // efname <file index>
     // Returns the name and the size of a file <name>|<size>
-    else if(strcmp_P(command_arg, PSTR("efinfo")) == 0)
+    else if(strncmp_P(command_arg, PSTR("efinfo"), 6) == 0)
     {
       //Argument 2: File index
       command_arg = get_cmd_arg(1);
@@ -1440,16 +1473,17 @@ uint8_t read_line(char* buffer, uint8_t buffer_length)
       --read_length;
       buffer[read_length] = '\0';
 
-      Serial.print(0x08);
+      Serial.print((char)0x08);
       Serial.print(' ');
-      Serial.print(0x08);
+      Serial.print((char)0x08);
 
       continue;
     }
 
-    Serial.print(c);
+    // Only echo back if this is enabled
+    if ((feedback_mode & ECHO) > 0)
+      Serial.print((char)c);
 
-    //if(c == '\n')
     if(c == '\r') {
       Serial.println();
       buffer[read_length] = '\0';
@@ -2245,25 +2279,6 @@ uint8_t split_cmd_line_args(char* buffer, uint8_t buffer_length)
 
   //Return the number of available command line arguments
   return count_cmd_args();
-}
-
-//Call this function to ensure the number of parameters do not
-//exceed limit. The main purpose of this function is to avoid
-//entering file names containing spaces.
-uint8_t too_many_arguments_error(uint8_t limit, char* command)
-{
-  uint8_t count;
-  if ((count = count_cmd_args()) > limit)
-  {
-    PgmPrint("too many arguments(");
-    Serial.print(count); //uart_putw_dec(count);
-    PgmPrint("): ");
-    Serial.println(command);
-    //uart_putc('\n');
-    return 1;
-  }
-
-  return 0;
 }
 
 //Returns char* pointer to buffer if buffer is a valid number or

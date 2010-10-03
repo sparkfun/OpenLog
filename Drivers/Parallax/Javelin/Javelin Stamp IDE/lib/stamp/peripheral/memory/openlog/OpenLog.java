@@ -96,6 +96,7 @@ import stamp.math.*;
  *
  * @author Paul Ring - hexor@coolbox.se
  * @version 1.1 - June, 2010
+ * @version 1.2 - October, 2010
  */
 
 public class OpenLog {
@@ -212,8 +213,14 @@ public class OpenLog {
     // According to the documentation we have to send
     // the escape character several times (default is 3) in order to abort if in
     // logging mode
-    for (int i = 0; i < 10; i++) {
+    int i = 0;
+    for (i = 0; i < 10; i++) {
       txUart.sendByte(EscChar);
+      CPU.delay(500);
+    }
+
+    for (i = 0; i < 10; i++) {
+      txUart.sendByte(CR);
       CPU.delay(500);
       while (rxUart.byteAvailable()) {
         if ((char)rxUart.receiveByte() == shellReady ) {return true;}
@@ -275,8 +282,8 @@ public class OpenLog {
       // Send Ctrl+Z to escape from append mode
       escapeCharAck();
     } else {
-      // Send a single LF ('\n') to exit from write mode
-      txUart.sendByte(LF);
+      // Send a single CR ('\r') to exit from write mode
+      txUart.sendByte(CR);
     }
     // We should be alive now
     return openLogAlive();
@@ -289,16 +296,19 @@ public class OpenLog {
     if (reply != null)
       buff = reply;
 
+    // Clear the UART
+    while (rxUart.byteAvailable())
+      rxUart.receiveByte();
+
     // Send message
     buff.clear();
     buff.append(command);
+    buff.append(CR);
     txUart.sendString(buff.toString());
-    txUart.sendByte('\n');
 
     buff.clear();
 
     int count = 0;
-    boolean endTokenFound = false;
     int capacity = buff.capacity();
     opBuffer.clear();
 
@@ -306,9 +316,12 @@ public class OpenLog {
     // Collect the return value and the result
     timer.mark();
     while (!timer.timeout(10000) && !rxUart.byteAvailable()) {CPU.delay(10);}
-    while (rxUart.byteAvailable() && !endTokenFound) {
-      char ch = (char)rxUart.receiveByte();
-      if ((ch != (char)EscChar) && (ch != 0) && (count < capacity)) {
+    while (true) {
+      char ch = 0;
+      if (rxUart.byteAvailable())
+        ch = (char)rxUart.receiveByte();
+
+      if ((ch != (char)EscChar) && ((ch != 0) && (ch != -1)) && (count < capacity)) {
         buff.append(ch);
         count++;
       } else if (ch == (char)EscChar) {
@@ -515,7 +528,8 @@ public class OpenLog {
 
     int openLogInit = 0;
     while (!(success = fwrite(fileName, fileData, append))) {
-      if (openLogInit++ > 2) { break; }; // Made 2 tries and still the problem is not fixed
+      CPU.delay(5000);
+      if (openLogInit++ > 1) { break; }; // Made 2 tries and still the problem is not fixed
     }
 
     return success;
@@ -593,6 +607,8 @@ public class OpenLog {
     opBuffer.clear();
     for (int i = 0; i < length; i++) {
       char ch = tempBuffer.charAt(i);
+      if ((ch == CR) || (ch == LF)) // Skip '\n' and '\r'
+        continue;
       if (!isNumeric(ch)) { // enough here, we are not excepting anything more
         break;
       }
@@ -612,12 +628,14 @@ public class OpenLog {
   }
 
   public boolean openLogRestart() {
-
     // Hardware reset according to OpenLog documentation
     CPU.writePin(resetPin, false);
     delay(0);
     CPU.writePin(resetPin, true);
-    delay(8); // Give the OpenLog some time to initialize itself
+    delay(6); // Give the OpenLog some time to initialize itself
+    //CPU.writePin(this.resetPin, false);
+    //CPU.delay(1000);
+    //CPU.writePin(this.resetPin, true);
 
     // Send escape char in case it enters append mode
     escapeCharAck();
@@ -654,10 +672,10 @@ public class OpenLog {
       return false;
 
     // Turn off the binary mode
-    opBuffer.clear();
-    opBuffer.append("binary off");
-    if (!openLogExecute(opBuffer.toString(), null, shellReady))
-      return false;
+//    opBuffer.clear();
+//    opBuffer.append("binary off");
+//    if (!openLogExecute(opBuffer.toString(), null, shellReady))
+//      return false;
 
     return true;
   }
