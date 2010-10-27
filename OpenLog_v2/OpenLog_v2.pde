@@ -1,33 +1,42 @@
 /*
  12-3-09
- Copyright SparkFun Electronics© 2010
  Nathan Seidle
+ SparkFun Electronics© 2010
  spark at sparkfun.com
+ 
+ OpenLog hardware and firmware are released under the Creative Commons Share Alike v3.0 license.
+ http://creativecommons.org/licenses/by-sa/3.0/
+ Feel free to use, distribute, and sell varients of OpenLog. All we ask is that you include attribution of 'Based on OpenLog by SparkFun'.
+ 
+ OpenLog is based on the work of Bill Greiman and sdfatlib:
+ http://code.google.com/p/sdfatlib/
  
  OpenLog is a simple serial logger based on the ATmega328 running at 16MHz. The ATmega328
  should be able to talk to high capacity (larger than 2GB) SD cards. The whole purpose of this
  logger was to create a logger that just powered up and worked. OpenLog ships with standard 
  57600bps serial bootloader running at 16MHz so you can load new firmware with a simple serial
  connection. This makes it compatible with Arduino if needed.
+ 
+ OpenLog automatically works with 512MB, 1GB, 2GB, 4GB, 8GB, and 16GB microSD cards. We recommend FAT16 for 2GB and smaller cards. We 
+ recommend FAT32 for 4GB and larger cards.
  	
- OpenLog runs at 9600bps by default. This is configurable to 2400, 9600, 57600, and 115200bps. We recommend 
- you attach a serial connection to reconfigure the unit to work at a different serial speed, but you 
- should be able to do it in software.
+ OpenLog runs at 9600bps by default. This is configurable to 2400, 4800, 9600, 19200, 57600, and 115200bps. You can alter all settings 
+ including baud rate and escape characters by editing config.txt found on OpenLog.
  
  Type '?' to get a list of supported commands.
  	
- During power up, you will see '12>'. '1' indicates the serial connection is established. '2' indicates
- the SD card has been successfully initialized. '>' indicates OpenLog is ready to receive commands.
+ During power up, you will see '12<'. '1' indicates the serial connection is established. '2' indicates
+ the SD card has been successfully initialized. '<' indicates OpenLog is ready to receive serial characters.
  
- Recording constant 115200bps datastreams are supported. Throw it everything you've got!
+ Recording constant 115200bps datastreams are supported. Throw it everything you've got! To acheive this maximum record rate, please use the
+ SD card formatter from : http://www.sdcard.org/consumers/formatter/. The fewer files on the card, the faster OpenLog is able to begin logging.
+ 200 files is ok. 2GB worth of music and pictures is not.
  	
- 'cd ..' is a bit weird. Normally it's 'cd..' but to change to a lower dir, use 'cd ..'
+ To a lower dir, use 'cd ..' instead of 'cd..'.
  	
- Currently, the firmware supports creating a new file or directory up to 16 characters including the
- '.' and extension. "123456789012.txt" is the longest name. Any longer and the module will re-initialize
- as if there was a variable sizeof error.
+ Only standard 8.3 file names are supported. "12345678.123" is acceptable. "123456789.123" is not.
  
- Capital letters, white space, and other characters are supported ("Hi there#$_.txt").
+ All file names are pushed to upper case. "NewLog.txt" will become "NEWLOG.TXT".
  
  Type 'set' to enter baud rate configuration menu. Select the baud rate and press enter. You will then 
  see a message 'Going to 9600bps...' or some such message. You will need to power down OpenLog, change 
@@ -40,9 +49,6 @@
  Please note: The preloaded STK500 serial bootloader is 2k, and begins at 0x7800 (30,720). If the code is
  larger than 30,719 bytes, you will get verification errors during serial bootloading.
  
- SD vs HCSD configuration is found in sd_raw_config.h - Currently only 512MB, 1GB, 2GB, and some 
- 4GB cards work (not yet compatible with HCSD cards).
- 
  STAT1 LED is sitting on PD5 (Arduino D5) - toggles when character is received
  STAT2 LED is sitting on PB5 (Arduino D13) - toggles when SPI writes happen
  
@@ -50,10 +56,10 @@
  No SD card - 3 blinks
  Baud rate change (requires power cycle) - 4 blinks
  
- During an append, OpenLog will buffer 512 characters at a time. That means that if the system loses power
- while reading in characters, you may loose up to, but no more than, 511 characters. This is important for low
- power systems where you may not know when the battery or power will die. OpenLog should record each buffer as 
- it receives each 512 byte chunk. The only way to exit an append is with Ctrl+z (ASCII 26).
+ OpenLog regularly shuts down to conserve power. If after 1.5 seconds no characters are received, OpenLog will record any unsaved characters
+ and go to sleep. OpenLog will automatically wake up and continue logging the instand a new character is received. If power is lost during normal
+ operation, OpenLog should lose a maximum of the RX_BUFF / 2. This is currently a max of 350 characters. It's actually quite hard to get into this scenario
+ and is rare with normal operation. 
  
  8mA idle
  18mA actively writing
@@ -62,272 +68,7 @@
  TX-O pin will not be greater than 3.3V. This may cause problems with some systems - for example if your
  attached microcontroller requires 4V minimum for serial communication (this is rare).
  
- 
- v1.1
- Adding better defines for EEPROM settings
- Adding new log and sequential log functions.
- 
- Code is acting very weird with what looks to be stack crashes. I can get around this by turning the optimizer off ('0').
- Found an error : EEPROM functions fail when optimizer is set to '0' or '1'. 
- sd-reader_config.h contains flag for USE_DYNAMIC_MEMORY
- 
- Looks like tweaking the optimization higher causes the asm("nop"); to fail inside the append_file routine. Changing this to
- delay_us(1); works.
- 
- I have a sneaking suspicion that I was having buffer overrun problems when defining the input_buffer at 1024 bytes. The
- ATmega328 should have enough RAM (2K) but weird reset errors were occuring. With the buffer at 512bytes, append_file runs 
- just fine and is able to log at 115200 at a constant data rate.
- 
- Added file called 'lots-o-text.txt' to version control. This text contains easy to scan text to be used for full data
- rate checking and testing.	
- 
- 
- v1.2
- ringp added:
- Adding support for splitting command line parameters into arguments
- Adding support for reading files sequencially
- 	read <filename> <start> <length>
- New log now for sequencial log functions supports 0-65535 files
- Adding support for wildcard listing or deletion of files
- 	ls <wildcard search>
- 	rm <wildcard delete>
- 
- Really great additions. Thanks ringp!
- 
- Nate added error testing within newlog()
- Checks to see if we have 65534 logs. If so, error out to command prompt with "!Too many logs:1"
- 
- 
- v1.3
- Added sd_raw_sync() inside append_file. I believe this was why tz1's addition of the timeout buffer update feature
- was not working. Auto buffer update now working. So if you don't send anything to OpenLog for 5 seconds,
- the buffer will automatically record/update.
- 
- Need to create 'Testing' page to outline the battery of tests we need to throw at any OpenLog after a firmware 
- submission and update is complete.
- 
- Testing
- create 40,000 logs
- 
- Record at full speed:
- Run at full 115200, load lotsoftext.txt and verify no characters are dropped.
- 
- Detect too many logs:
- Create new log at 65533 (do this by editing 'zero' function to set EEPROM to 0xFF and oxFD) 
- and power cycle. Verify unit starts new log. Power cycle and verify unit errors out and drops to command prompt.
- 
- Record buffer after timeout:
- Create new log. Type 20 characters and wait 5 seconds. Unit should auto-record buffer. Power down unit. 
- Power up unit and verify LOG has 20 characters recorded.	
- 
- 
- v1.4
- Added exit options to the two menus (set and baud)
- Also added display of current settin to two menus (Ex: "Baud currently: 57600bps")
- 
- Added '!' infront of 'error opening'. This pops up if there is an error while trying to append
- to a freshly created new log (ex: LOG00548.txt is created, then errors out because it cannot append).
- '!' was added so that user can parse against it.
- 
- Replicated logging errors at 57600 using 5V Arduino
- Unit would systematically glitch during logging of 111054 bytes
- 
- Increasing buffer to 1000 characters caused URU error.
- URU: Unit Resets Unexpectedly
- 
- To recreate URU error. Type "append ". Include the space. If you get "!error opening", then things are 
- fine. If you get "!error opening#" where # is a weird character, then type 'ls' and the unit will 
- unexpectedly reset (URU error). I believe this is attributed to a memory overrun somewhere in the
- FAT system.
- 
- Changed buffer size to 900 and declared the character buffer as volatile
- #define BUFF_LEN 900
- volatile char input_buffer[BUFF_LEN];
- 
- This increase to the buffer allows for clean logging of 444055 bytes with no URU errors.
- 
- Experimenting with Scott's SD cards (customer gave cards on loan for recreating logging errors):
- Card with single ~740mb file produces errors when trying to open/append to new log. 
- Card with less stuff on it logs full 444055 bytes correctly.
- 
- 
- v1.5
- Added 4800bps and 19200bps support
- 
- Added power saving features. Current consumption at 5V is now:
- In default append mode: 
- 	6.6/5.5mA while receiving characters (LED On/Off)
- 	2.1mA during idle
- In command mode: 3.2/2.1mA (LED On/Off)
- 
- So if you're actively throwing characters at the logger, it will be ~6mA. If you send the logger
- characters then delay 5-10 seconds, current will be ~2.5mA. (Unit records the characters in the buffer
- and goes into idle more if no characters are received after 5 seconds)
- 
- These power savings required some significant changes to uart.c / uart_getc()
- 
- 
- v1.51 check_emergency_reset, default break character is ctrl+z 3 times, example Arduino sketch
- 
- Added function from mungewell - check_emergency_reset. This has improved testing of the RX pin.
- There was potential to get a false baud reset. There is still a chance but it's now much less likely.
- 
- If OpenLog is attached to a Arduino, during bootloading of the Arduino, ctrl+z will most likely be sent
- to the Arduino from the computer. This character will cause OpenLog to drop to command mode - probably
- not what we want. So I added user selectable character (ctrl+x or '$' for example) and I added
- user selectable number of escape characters to look for in a row (example is 1 or 2 or 3, '$$$' is a
- common escape sequence). The default is now ctrl+z sent 3 times in a row.
- 
- Added an example Arduino sketch (from ScottH) to GitHub so that people can easily see how to send characters to
- OpenLog. Not much to it, but it does allow us to test large amounts of text thrown at OpenLog
- at 57600bps.
- 
- 
- v1.6 Adding config file.
- 
- What happens if I reset the system by pulling RX low, but the config file has corrupt values in it?
- 
- If config file has corrupt values in it, system will default to known values 9600/ctrl+z/3/newlog
- 
- If config file is empty, system resets to known values
- 
- After some massive testing, and lots of code to check for illegal states, it looks to be pretty stable. 
- The only problem is that we're running out of RAM. The buffer had to be decreased from 900 bytes 
- to 700 bytes to facilitate all the config file checking. Testing at 57600bps, unit runs very well
- over 40kb test file on straight RS232 connection. That's pretty good. Testing at 115200 on straight 
- connection, unit will drop a buffer every once and a while. Not great, but not much we can do if the
- SD card times out for ~150ms while it's writing.
- 8 bits to the byte plus a start/stop bit = 10 bits per byte
- 
- @ 9600bps = 960 bytes per second. Buffer will last for 729ms
- @ 57600bps = 5760 bytes per second. Buffer will last for 121ms
- @ 115200bps = 11520 bytes per second. Buffer will last for 60.7ms
- 
- So if the SD card pauses for more than 60ms, 115200 will have lost data, sometimes. All other baud rates
- should be covered for the most part.
- 	
- SD cards with larges amounts of data will have increased pause rates. Always use a clean card where possible.
- 
- 
- v1.61 Small PCB change. Fixed version # in help menu.
- 
- Fixed the firmware version in the help menu to v1.61.
- 
- Updated Eagle files to Eagle v5.9. Fixed weird airwire. Changed D1 LED from Green to Blue. 
- Will only affect new production after 4-28-10.
- 
- Closed some tickets and wrote some more example Arduino code:
- http://forum.sparkfun.com/viewtopic.php?t=21438
- 
- 
- v2.0 - 25986 bytes out of 30720
- Welcome to version 2! We've moved from Roland Riegel's FAT library to Bill Greiman's sdfatlib. OpenLog now works with SD cards
- up to 16GB (that is the current largest microSD card we can get our hands on). OpenLog automatically detects and works with FAT16/FAT32 
- file systems. It also automatically works with normal SD cards as well as SDHC cards.
- 
- Almost all the previous commands have been ported from v1 to v2. The current commands that do not work:
- cd.. - does not work. You can change to an upper directory, but you cannot navigate back down the tree.
- cat - this command was depricated. HEX printing is now done with the 'read' command. We've added a 5th argument to select between ASCII and HEX printing.
- Wild cards do not yet work. So rm and ls do not have wild cards enabled - yet. Help us out!
- 
- Porting OpenLog to work directly under Arduino to work with sdfatlib (http://code.google.com/p/sdfatlib/) by Bill Greiman.
- 
- sdfatlib intrinsically supports FAT16, FAT32 as well as SD and HCSD cards. In a word, it's amazing.
- 
- Needs to be done:
- Done - Get config file reading/loading working
- Document config file in wiki: if no config file is found, current system settings are used. If config is found, system switches to settings found in file. If system settings are changed, then config file is changed and system uses new settings immediately.
- Done - We don't want to constantly record a new config file on each power on. Only record when there is a change.
- Get cd.. working
- Seperate OpenLog_v2 into multiple files
- Re-test too many log files created in the newlog setting - 65535. Potentially create thousands of files and see how sdfatlib handles it.
- Done - Test sequential logging.
- Get wild card support working for ls and rm
- Get backspace working
- Test rm with directories, and directory wildcards? Maybe not.
- Get power save working
- Test compile on a computer that doesn't have WinAVR
- 
- Test commands:
- new - works, also in sub dirs
- append - works, also in sub dirs
- rm - works, but does not yet support wild cards.
- md - works, also in sub dirs
- cd - you can change up to a sub-directory, but you cannot navigate back down the tree. The current work around is to type 'init'. This will re-init the card and set the directory back to root.
- ls - works pretty well but does not yet support wild cards. Shows directories, files, and file sizes. Would be cool if it listed dirs first.
- read - works well. Tested 0, 1, 2, 3, 4, and 5 arguments (included and left off). Fails gracefully. Now prints in HEX as well!
- size - works well
- disk - works well, prints more information than ever before!
- init - works well
- sync - works, but not really tested
- cat - I've decided to drop this command. You can now print in hex using the read command and using a 5th argument as '1' for ASCII (default) and '2' for HEX.
- 
- set - works well
- baud - works well
- 
- 
- v2.1 - Power save not working. Fixed issue 35. Dropping characters at 57600bps. 
- 26058 bytes out of 30720
- Fixed a bug found by Salient (Issue 35). User settings where declared at chars which allowed them to be signed. If a user went from old firmware, to v2,
- the safety checks would fail because the settings would be read at -1 instead of 255. Declaring user settings as byte fixed issue.
- 
- Added "a) Clear user settings" to set menu. This allows us to completely wipe an OpenLog (user settings and config file) to see how it will respond
- to future firmware changes.
- 
- Improved the file 'size' command.
- 
- Sequential logging is tested and works.
- 
- Receive testing: Using the Test_Sketch found on Github, I am testing the receive reliability at different UART speeds.
- We need to test a lot of received data. At 57600, 115200, and both from an Arduino (lots of time in between characters becuase of software overhead)
- and from a raw serial port (almost no time in between characters). I am hoping to make sdfatlib hiccup at 115200, full speed, across a 1MB file. If 
- I can make it fail, then we can start to increase the buffer size and look at how much RAM sdfatlib has left open for the buffer.
- 
- 9600bps from Arduino works fine
- 57600bps from Arduino drops characters
- 115200 from Arduino drops characters
- 
- It seems that sdfatlib takes longer to write to the SD card than the original file system from Robert Reigel. I'm thinking perhaps
- we should create a version of OpenLog firmware that is just sequantial logging, no fancy system menus... It might open up some RAM.
- 
- If only we could get control of the UART from Arduino's clutches, we could probably handle the ring buffer much better. Not sure how to handle UART
- interrupts without tearing out HardwareSerial.cpp.
- 
- Added README to the Test sketch. Added 115200bps to test sketch.
- 
- 
- v2.11 Tested with 16GB microSD. Fixed some general bugs. Lowered power consumption.
- 
- 26136 bytes out of 30720
- 
- Fixed issue 30. I added printing a period ('.') for non-visible ASCII characters during a 'read' command. This cleans up the output a bit. HEX 
- printing is still available. 
- 
- Fixed issue 34. When issuing a long command such as "read log00056.txt 100 200 2" (read from spot 100 to spot 200 and print in HEX), the
- command shell would die at 24 spots. I increased both the general_buffer and 'buffer' in the command shell from 24 to 30. The limit is now
- 30 characters, so "read log00056.txt 100 20000 2" is allowed.
- 
- Works with a 16GB microSD card! High volume test: loaded 16GB card with 5GB of data. Basic serial tests work. When running at 57600, there
- is an odd delay. I think it has to do with the file system doing an initial scan for an available cluster. Takes 2-3 seconds before OpenLog
- returns to normal. This can cause significant data loss.
- 
- Fixing power management in v2. Power down after no characters for 3 seconds now works. Unit drops to 2.35mA in sleep. 7.88mA in sitting 
- RX mode (awake but not receiving anything). There is still a weird bug where the unit comes on at 30mA. After sleep, it comes back at the 
- correct 7-8mA. Is something not getting shut off?
- 
- 
- v2.2 Modified append_file() to use a single buffer. Increased HardwareSerial.cpp buffer to 512 bytes.
- 
- More testing at 57600. Record times look to be 2, 5, and zero milliseconds when doing a record. This means that the split buffer doesn't
- really make a difference? There are some records that take 150ms, 14ms, etc. At 57600bps, that's 7200 bytes/s, 138us per byte. With a 150ms
- pause, that's 1,086 bytes that need to be buffered while we wait... Grrr. Too many.
- 
- I re-wrote the append_file function to use only one buffer. This allows us to more quickly pull data from the hardware serial buffer. Hardware 
- serial buffer has to be increased manually to 512. This file (hardwareserial.cpp) is stored in the Arduino directory. With testing,
- it seems like recording is working more solidly at 57600bps. But now I'm seeing glitches at 19200bps so more testing is required before we
- make this the official OpenLog release.
- 
- Moved input_buffer into within the append function. Attempting to shave bytes of RAM.
+ OpenLog has progressed significantly over the past year. Please see Changes.txt or GitHub for a full change log.
  
  
  v2.21 ringp fork brought in. Wildcard remove and list commands now work. Remove directory now works! Change directory up/down the tree works again.
@@ -351,6 +92,75 @@
  verbose <"on"|"off">: sets whether command errors are verbose (long winded) or just the "!" character. Example: "verbose off" sets verbose off. Then if a 
  command like "blah" is received, then only "!>" is seen from the command line interface. This makes it easier for embedded systems to recognize there 
  was an error. This setting is not recorded to EEPROM.
+ 
+ 
+ v2.3 Migrated to v10.10.10 of sdfatlib. Moved to inline RX interrupt and buffer. Improved the ability to receive a constant stream at 57600bps.
+ 
+ 27334 bytes out of 30720.
+ 
+ Remember - we had to completely butcher HardwareSerial.cpp so a normal Arduino installation will not work. 
+ C:\arduino-xxxx\hardware\arduino\cores\arduino\HardwareSerial.cpp
+ 
+ I removed the receive interupt handler from HardwareSerial.cpp so that we can deal directly with USART_RX_vect in the main code. This allows
+ us to return to the way OpenLog used to operate - by having one buffer split in half. Once one half fills, it is recorded to SD while the other
+ half fills up. This dramatically decreases the time spent in function calls and SD recording, which leads to many fewer characters dropped.
+ 
+ The change log at the top of the main code got so large I've moved it to a version controlled "Changes.txt" file.
+ 
+ By making all these changes, I have broken many things. Ringp - I could use your help here. I apologize for stomping on so much of your work. I was not
+ good enough to figure out how to re-link from the old function calls to the new sdfatlib setup.
+ 
+ Backspace is broken - ringp, I saw this fix in one of your commits, but looking at the code, I don't see how it is supposed to work. Either way, we still
+ get 0x08 when trying to backspace.
+ 
+ Search for //Error in main pde
+ ls is not working fully
+ remove is not working
+ fileInfo is not working
+ 
+ New sdfatlib doesn't have SdFat.cpp so fileInfo doesn't work. These function calls are marked with //Error
+ 
+ I have chosen to dis-allow deprecated functions:
+ #define ALLOW_DEPRECATED_FUNCTIONS 0
+ This forced some trivial changes to the SD write and new file creation function calls. I believe we've successfully migrated to the new version of sdfatlib.
+ 
+ In the command_shell / read_line function : It may be better to pull directly from the UART buffer and use the RX interrupt. For now, we brute force it.
+ 
+ Because of all these changes, I need to re-test power consumption. For now, I'm confident it's low enough.
+ 
+ Testing with 512 buffer array size
+ 1GB @ 57600 - dropped very little out of 3 tests
+ 1GB @ 115200 - dropped very little out of 2 tests
+ 8GB @ 57600 - Formatted using the sd formater (32k byte allocation size). Dropped nothing.
+ 8GB @ 115200 - dropped very little, dropped none
+ 16GB w/ Lots of files @ 57600 - Drops the first part of the file because of start up delay?
+ 16GB w/ Lots of files @ 115200
+ 
+ 1024 array size (and 800) does not run
+ 
+ Testing with 700 buffer array size
+ 1GB @ 57600 - 110300 out of 111000 bytes, 110300/111000,
+ 1GB @ 115200 - 111000/111000!, 109600/111000
+ 8GB @ 57600 - 109000/111000, 111000/111000!,
+ 8GB @ 115200 - 111000/111000!, 111000/111000!,
+ 16GB w/ Lots of files @ 57600 - 85120/111000, 85120/111000
+ 16GB w/ Lots of files @ 115200 - 56420 (but once it got going, log looks good). 56420.
+ 
+ I am seeing long delays on cards with lots of files. In the above tests, the 16GB test card is a good example. It has 2GB worth of random files in a sub directory.
+ After OpenLog boots, goes to '12<'. After I send ~500 characters OpenLog freezes for a couple seconds, then returns to normal, very fast, operation. During
+ that down time, I believe sdfatlib is searching for an open cluster. The odd thing is that after the cluster is established (after the initial down time) OpenLog
+ performs excellently. I am hoping to create a faux file or pre-write and save to the file or some how get this allocation done before we report the 
+ '12<' indicating we are ready. That way, if a card does fill up, as long as the host system is checking for '<', it doesn't matter how long it takes 
+ sdfatlib to find the next free cluster.
+ 
+ You can see that we drop 700 bytes at a time. That's a bit odd - I'd expect to drop half or 350 at a time. 
+ What happens if we shrink the array size to say 256? To be expected, this is bad - way more instances of dropped characters.
+ 
+ Added blink for each test to the OpenLog_Test sketch so we can see as the test progresses.
+ 
+ http://www.sdcard.org/consumers/formatter/ is the site for SD card formatting. It looks like this program takes a guess at the correct block size. This could
+ help a lot in the future.
+ 
  */
 
 #include "SdFat.h"
@@ -379,6 +189,21 @@
 
 #define sbi(port, port_pin)   ((port) |= (uint8_t)(1 << port_pin))
 #define cbi(port, port_pin)   ((port) &= (uint8_t)~(1 << port_pin))
+
+//#define RX_BUFF_SIZE  1024 //This larger buffer size does work but may not work in full OpenLog bells and whistles
+//#define RX_BUFF_SIZE  800 //Bad
+#define RX_BUFF_SIZE  700 //Works
+//#define RX_BUFF_SIZE  512
+//#define RX_BUFF_SIZE  256 //Drops lots
+char rxBuffer[RX_BUFF_SIZE];
+int rxSpot;
+
+//The very important receive interrupt handler
+SIGNAL(USART_RX_vect)
+{
+  rxBuffer[rxSpot++] = UDR0;
+  if(rxSpot == RX_BUFF_SIZE) rxSpot = 0;
+}
 
 char general_buffer[30];
 #define FOLDER_TRACK_DEPTH 15
@@ -503,15 +328,15 @@ void setup(void)
 #endif
 
   //Setup SD & FAT
-  if (!card.init()) {
+  if (!card.init(SPI_FULL_SPEED)) {
     PgmPrint("error card.init"); 
     blink_error(ERROR_SD_INIT);
   } // initialize the SD card
-  if (!volume.init(card)) {
+  if (!volume.init(&card)) {
     PgmPrint("error volume.init"); 
     blink_error(ERROR_SD_INIT);
   } // initialize a FAT volume
-  if (!currentDirectory.openRoot(volume)) {
+  if (!currentDirectory.openRoot(&volume)) {
     PgmPrint("error openRoot"); 
     blink_error(ERROR_SD_INIT);
   } // open the root directory
@@ -607,7 +432,7 @@ void newlog(void)
     sprintf(new_file_name, "LOG%05d.TXT", new_file_number); //Splice the new file number into this file name
 
     //Try to open file, if fail (file doesn't exist), then break
-    if (file.open(currentDirectory, new_file_name, O_CREAT | O_EXCL | O_WRITE)) break;
+    if (file.open(&currentDirectory, new_file_name, O_CREAT | O_EXCL | O_WRITE)) break;
   }
   file.close(); //Close this new file we just opened
   //file.writeError = false; // clear any write errors
@@ -641,7 +466,7 @@ void seqlog(void)
   char seq_file_name[13] = "SEQLOG00.TXT";
 
   //Try to create sequential file
-  if (!file.open(currentDirectory, seq_file_name, O_CREAT | O_WRITE))
+  if (!file.open(&currentDirectory, seq_file_name, O_CREAT | O_WRITE))
   {
     PgmPrint("Error creating SEQLOG\n");
     return;
@@ -661,21 +486,13 @@ void seqlog(void)
 //Returns 1 on success
 uint8_t append_file(char* file_name)
 {
-  //44051
-  //This is the size of the receive buffer. The bigger it is, the less likely we will overflow the buffer while doing a record to SD.
-  //But we have limited amounts of RAM (~1100 bytes)
-#define BUFF_LEN 50 //50 works well. Too few and we will call file.write A LOT. Too many and we run out of RAM.
-  //#define BUFF_LEN 400 //Fails horribly for some reason. Oh right, readSpot only goes to 255.
-  //#define BUFF_LEN 100 //Works well.
-  char inputBuffer[BUFF_LEN];
+  int checkedSpot;
   char escape_chars_received = 0;
-  byte readSpot = 0; //Limited to 255
-  byte incomingByte;
 
   // O_CREAT - create the file if it does not exist
   // O_APPEND - seek to the end of the file prior to each write
   // O_WRITE - open for write
-  if (!file.open(currentDirectory, file_name, O_CREAT | O_APPEND | O_WRITE)) {
+  if (!file.open(&currentDirectory, file_name, O_CREAT | O_APPEND | O_WRITE)) {
     if ((feedback_mode & EXTENDED_INFO) > 0)
       error("open1");
   }
@@ -689,10 +506,15 @@ uint8_t append_file(char* file_name)
   digitalWrite(statled1, HIGH); //Turn on indicator LED
 
   //Clear out the serial buffer
-  Serial.flush();
+  rxSpot = 0;
+  checkedSpot = 0;
+
+  //Start UART buffered interrupts
+  UCSR0B |= (1<<RXCIE0); //Enable receive interrupts
+  sei(); //Enable interrupts
 
   //Start recording incoming characters
-  //HardwareSerial.cpp has a buffer tied to the interrupt. We increased this buffer to 512 bytes
+  //  //HardwareSerial.cpp has a buffer tied to the interrupt. We increased this buffer to 512 bytes
   //As characters come in, we read them in and record them to FAT.
   while(1){
     uint16_t timeout_counter = 0;
@@ -716,67 +538,90 @@ uint8_t append_file(char* file_name)
     //file.close();
     //if (!file.open(currentDirectory, file_name, O_CREAT | O_APPEND | O_WRITE)) error("open1");
 
-    while(!Serial.available()){ //Wait for characters to come in
+    while(checkedSpot == rxSpot){ //Wait for characters to come in
       if(timeout_counter++ > 1200){ //If we haven't seen a character for about 3 seconds, then record the buffer, sync the SD, and shutdown
         timeout_counter = 0;
 
-        if(readSpot != 0){ //There is unrecorded stuff sitting in the buffer
-          //Record the buffer
-          if(file.write((byte*)inputBuffer, readSpot) != readSpot)
-            if ((feedback_mode & EXTENDED_INFO) > 0)
-              PgmPrintln("error writing to file");
+        if(checkedSpot != 0 && checkedSpot != (RX_BUFF_SIZE/2)) //There is stuff in buffer to record before we go to sleep
+        {
+          if(checkedSpot < (RX_BUFF_SIZE/2)) {
+            file.write(rxBuffer, checkedSpot); //Record first half the buffer
+          } 
+          else { //checked_spot > (BUFF_LEN/2)
+            file.write(rxBuffer + (RX_BUFF_SIZE/2), checkedSpot - (RX_BUFF_SIZE/2)); //Record second half the buffer
+          }
+
+          // rxSpot may have moved while we , copy
+          unsigned spot = checkedSpot > RX_BUFF_SIZE/2 ? RX_BUFF_SIZE/2 : 0;
+          unsigned sp = spot; // start of new buffer
+
+          cli();
+
+          while(checkedSpot != rxSpot) 
+          {
+            rxBuffer[spot++] = rxBuffer[checkedSpot++]; //Error - We are not checking for escape characters in here
+            if( checkedSpot >= RX_BUFF_SIZE )
+              checkedSpot = 0;
+          }
+
+          rxSpot = spot; // set insertion to end of copy
+          checkedSpot = sp; // reset checked to beginning of copy
+
+          sei();
+
+          file.sync(); //Push these new file.writes to the SD card
         }
 
-        file.sync(); //Push these new file.writes to the SD card
-        Serial.flush(); //Clear out the current serial buffer. This is needed if the buffer gets overrun. OpenLog will fail to read the escape character if
-        //the buffer gets borked.
-
-        //Reset the points so that we don't record these freshly recorded characters a 2nd time, when the unit receives more characters
-        readSpot = 0;
-
         //Now power down until new characters to arrive
-        while(!Serial.available()){
-          digitalWrite(statled1, LOW); //Turn off stat LED to save power
-          sleep_mode(); //Stop everything and go to sleep. Wake up if serial character received
+        while(checkedSpot == rxSpot){
+          digitalWrite(STAT1, LOW); //Turn off stat LED to save power
+          //sleep_mode(); //Stop everything and go to sleep. Wake up if serial character received
         }
       }
       delay(1); //Hang out for a ms
     }
 
-    incomingByte = Serial.read(); //Grab new character from hardwareserial.cpp buffer (could be 512 bytes)
-
     //Scan for escape character
-    if(incomingByte == setting_escape_character){
+    if(rxBuffer[checkedSpot] == setting_escape_character){
 #if DEBUG
       Serial.print("!");
 #endif
-      if(++escape_chars_received == setting_max_escape_character) break;
+      if(++escape_chars_received == setting_max_escape_character){
+        //Disable interrupt and we're done!
+        cli();
+        UCSR0B &= ~(1<<RXCIE0); //Clear receive interrupt enable
+        break;
+      }
     }
     else
       escape_chars_received = 0;
 
-    inputBuffer[readSpot++] = incomingByte; //Record character to the local buffer
+    checkedSpot++;
 
-    if(readSpot == BUFF_LEN){ //If we've filled the local small buffer, pass it to the sd write function.
-      //Record the buffer
-      if(file.write((byte*)inputBuffer, BUFF_LEN) != BUFF_LEN){
-        if ((feedback_mode & EXTENDED_INFO) > 0)
-          PgmPrintln("error writing to file");
-        break;
-      }
+    if(checkedSpot == (RX_BUFF_SIZE/2)) { //We've finished checking the first half the buffer
+      file.write(rxBuffer, RX_BUFF_SIZE/2); //Record first half the buffer
+    }
 
-      readSpot = 0; //Wrap the buffer
+    if(checkedSpot == RX_BUFF_SIZE){ //We've finished checking the second half the buffer
+      checkedSpot = 0;
+      file.write(rxBuffer + (RX_BUFF_SIZE/2), RX_BUFF_SIZE/2); //Record second half the buffer
     }
 
     STAT1_PORT ^= (1<<STAT1); //Toggle the STAT1 LED each time we receive a character
   } //End while - escape character received or error
 
   //Upon receiving the escape character, we may still have stuff left in the buffer, record the last of the buffer to memory
-  if(readSpot != BUFF_LEN){
-    //Record the buffer
-    if(file.write((byte*)inputBuffer, readSpot) != readSpot)
-      if ((feedback_mode & EXTENDED_INFO) > 0)
-        PgmPrintln("error writing to file");
+  if(checkedSpot == 0 || checkedSpot == (RX_BUFF_SIZE/2))
+  {
+    //Do nothing, we already recorded the buffers right before catching the escape character
+  }
+  else if(checkedSpot < (RX_BUFF_SIZE/2))
+  {
+    file.write(rxBuffer, checkedSpot); //Record first half the buffer
+  }
+  else //checkedSpot > (RX_BUFF_SIZE/2)
+  {
+    file.write(rxBuffer + (RX_BUFF_SIZE/2), checkedSpot - (RX_BUFF_SIZE/2)); //Record second half the buffer
   }
 
   file.sync();
@@ -806,13 +651,13 @@ uint8_t gotoDir(char *dir)
     currentDirectory.close();
 
     // open the root directory
-    if (!currentDirectory.openRoot(volume)) error("openRoot");
+    if (!currentDirectory.openRoot(&volume)) error("openRoot");
     int8_t index = getNextFolderTreeIndex() - 1;
     if (index >= 0)
     {
       for (int8_t iTemp = 0; iTemp < index; iTemp++)
       {
-        if (!(tmp_var = subDirectory.open(currentDirectory, folderTree[iTemp], O_READ)))
+        if (!(tmp_var = subDirectory.open(&currentDirectory, folderTree[iTemp], O_READ)))
           break;
 
         currentDirectory = subDirectory; //Point to new directory
@@ -828,7 +673,7 @@ uint8_t gotoDir(char *dir)
   }
   else
   {
-    if (!(tmp_var = subDirectory.open(currentDirectory, dir, O_READ))) {
+    if (!(tmp_var = subDirectory.open(&currentDirectory, dir, O_READ))) {
       if ((feedback_mode & EXTENDED_INFO) > 0)
       {
         PgmPrint("directory not found: ");
@@ -847,6 +692,11 @@ uint8_t gotoDir(char *dir)
 }
 void command_shell(void)
 {
+  //Serial.begin causes the receive interrupt to turn on
+  //This is bad for command_shell that relies on non-interrupt driven line reads
+  cli();
+  UCSR0B &= ~(1<<RXCIE0); //Clear receive interrupt enable
+
   //provide a simple shell
   char buffer[30];
   uint8_t tmp_var;
@@ -893,7 +743,7 @@ void command_shell(void)
       currentDirectory.close();
 
       // open the root directory
-      if (!currentDirectory.openRoot(volume)) error("openRoot");
+      if (!currentDirectory.openRoot(&volume)) error("openRoot");
 
       PgmPrintln("File system initialized");
 #ifdef INCLUDE_SIMPLE_EMBEDDED
@@ -957,7 +807,8 @@ void command_shell(void)
         Serial.println(volume.fatType(), DEC);
       }
 
-      currentDirectory.ls(LS_SIZE, 0, &wildcmp, get_cmd_arg(1));
+      //Error currentDirectory.ls(LS_SIZE, 0, &wildcmp, get_cmd_arg(1));
+      currentDirectory.ls(LS_SIZE);
 
 #ifdef INCLUDE_SIMPLE_EMBEDDED
       command_succedded = 1;
@@ -977,7 +828,7 @@ void command_shell(void)
         continue;
 
       SdFile newDirectory;
-      if (!newDirectory.makeDir(currentDirectory, command_arg)) {
+      if (!newDirectory.makeDir(&currentDirectory, command_arg)) {
         if ((feedback_mode & EXTENDED_INFO) > 0)
         {
           PgmPrintln("error creating directory: ");
@@ -1009,7 +860,7 @@ void command_shell(void)
       //Calling rmRfStart() will result in OpenLog rebooting.
       if (strncmp_P(command_arg, PSTR("-f"), 2) == 0)
       {
-        if (file.open(currentDirectory, command_arg, O_READ))
+        if (file.open(&currentDirectory, command_arg, O_READ))
           file.close(); //There is a file called "-f"
         else
         {
@@ -1023,7 +874,8 @@ void command_shell(void)
       }
 
       //Argument 2: File name or file wildcard removal
-      uint32_t filesDeleted = currentDirectory.remove(&wildcmp, get_cmd_arg(1), &removeErrorCallback);
+      //Error      uint32_t filesDeleted = currentDirectory.remove(&wildcmp, get_cmd_arg(1), &removeErrorCallback);
+      uint32_t filesDeleted = 0;
       if ((feedback_mode & EXTENDED_INFO) > 0)
       {
         Serial.print(filesDeleted);
@@ -1049,7 +901,7 @@ void command_shell(void)
       tmp_var = gotoDir(command_arg);
 
 #ifdef INCLUDE_SIMPLE_EMBEDDED
-        command_succedded = tmp_var;
+      command_succedded = tmp_var;
 #endif
     }
 
@@ -1061,7 +913,7 @@ void command_shell(void)
         continue;
 
       //search file in current directory and open it
-      if (!file.open(currentDirectory, command_arg, O_READ)) {
+      if (!file.open(&currentDirectory, command_arg, O_READ)) {
         if ((feedback_mode & EXTENDED_INFO) > 0)
         {
           PgmPrint("Failed to open file ");
@@ -1135,7 +987,7 @@ void command_shell(void)
         continue;
 
       //search file in current directory and open it
-      if (!file.open(currentDirectory, command_arg, O_WRITE)) {
+      if (!file.open(&currentDirectory, command_arg, O_WRITE)) {
         if ((feedback_mode & EXTENDED_INFO) > 0)
         {
           PgmPrint("Failed to open file ");
@@ -1196,7 +1048,7 @@ void command_shell(void)
         continue;
 
       //search file in current directory and open it
-      if (file.open(currentDirectory, command_arg, O_READ)) {
+      if (file.open(&currentDirectory, command_arg, O_READ)) {
         Serial.print(file.fileSize());
 #ifdef INCLUDE_SIMPLE_EMBEDDED
         command_succedded = 1;
@@ -1233,7 +1085,7 @@ void command_shell(void)
 
       //Print card information
       cid_t cid;
-      if (!card.readCID(cid)) {
+      if (!card.readCID(&cid)) {
         PgmPrint("readCID failed");
         continue;
       }
@@ -1265,7 +1117,7 @@ void command_shell(void)
 
       csd_t csd;
       uint32_t cardSize = card.cardSize();
-      if (cardSize == 0 || !card.readCSD(csd)) {
+      if (cardSize == 0 || !card.readCSD(&csd)) {
         PgmPrintln("readCSD failed");
         continue;
       }
@@ -1302,7 +1154,7 @@ void command_shell(void)
         continue;
 
       //Try to open file, if fail (file doesn't exist), then break
-      if (file.open(currentDirectory, command_arg, O_CREAT | O_EXCL | O_WRITE)) {//Will fail if file already exsists
+      if (file.open(&currentDirectory, command_arg, O_CREAT | O_EXCL | O_WRITE)) {//Will fail if file already exsists
         file.close(); //Everything is good, Close this new file we just opened
 #ifdef INCLUDE_SIMPLE_EMBEDDED
         command_succedded = 1;
@@ -1381,7 +1233,7 @@ void command_shell(void)
       file_index = 0;
 
       PgmPrint("count|");
-      Serial.println(currentDirectory.fileInfo(FI_COUNT, 0, buffer));
+      //Error      Serial.println(currentDirectory.fileInfo(FI_COUNT, 0, buffer));
       command_succedded = 1;
     }
     // efinfo <file index>
@@ -1397,7 +1249,8 @@ void command_shell(void)
         {
           file_index = strtolong(command_arg);
           memset(buffer, 0, sizeof(buffer));
-          uint32_t size = currentDirectory.fileInfo(FI_INFO, file_index, buffer);
+          //Error          uint32_t size = currentDirectory.fileInfo(FI_INFO, file_index, buffer);
+          uint32_t size = 0;
           Serial.print(buffer);
           Serial.print('|');
           Serial.println(size);
@@ -1427,19 +1280,20 @@ uint8_t read_line(char* buffer, uint8_t buffer_length)
 
   uint8_t read_length = 0;
   while(read_length < buffer_length - 1) {
-    while (!Serial.available());
-    uint8_t c = Serial.read();
+    //while (!Serial.available()); //We've destroyed the standard way Arduino reads characters so this no longer works
+    //uint8_t c = Serial.read();
+    uint8_t c = uart_getc(); //It would be better to pull directly from the UART buffer and use the RX interrupt, but this works
 
-    //PORTD ^= (1<<STAT1); //Blink the stat LED while typing - this is taken care of in the UART ISR
-    //PORTB ^= (1<<STAT2); //Blink the stat LED while typing - I don't want the SPI lines toggling
+    STAT1_PORT ^= (1<<STAT1); //Blink the stat LED while typing
 
-    if(c == 0x08 || c == 0x7f) {
+    if(c == 0x08 || c == 0x7f) { //Backspace characters
       if(read_length < 1)
         continue;
 
       --read_length;
       buffer[read_length] = '\0';
 
+      //Try to erase the character sitting on the command line
       Serial.print(0x08);
       Serial.print(' ');
       Serial.print(0x08);
@@ -1447,10 +1301,11 @@ uint8_t read_line(char* buffer, uint8_t buffer_length)
       continue;
     }
 
-    Serial.print(c);
+    // Only echo back if this is enabled
+    if ((feedback_mode & ECHO) > 0)
+      Serial.print((char)c);
 
-    //if(c == '\n')
-    if(c == '\r') {
+    if(c == '\n') {
       Serial.println();
       buffer[read_length] = '\0';
       break;
@@ -1465,6 +1320,17 @@ uint8_t read_line(char* buffer, uint8_t buffer_length)
   split_cmd_line_args(buffer, buffer_length);
 
   return read_length;
+}
+
+uint8_t uart_getc(void) 
+{    
+  while(!(UCSR0A & _BV(RXC0)));
+
+  uint8_t b = UDR0;
+  if(b == '\r')
+    b = '\n';
+
+  return b;
 }
 
 //Reads the current system settings from EEPROM
@@ -1510,7 +1376,7 @@ void read_system_settings(void)
 
 void print_menu(void)
 {
-  PgmPrintln("OpenLog v2.21");
+  PgmPrintln("OpenLog v2.3");
   PgmPrintln("Available commands:");
   PgmPrintln("new <file>\t\t: Creates <file>");
   PgmPrintln("append <file>\t\t: Appends text to end of <file>. The text is read from the UART in a stream and is not echoed. Finish by sending Ctrl+z (ASCII 26)");
@@ -1723,8 +1589,9 @@ void system_menu(void)
     {
       PgmPrint("Enter a new escape character: ");
 
-      while(!Serial.available()); //Wait for user to hit character
-      setting_escape_character = Serial.read();
+      //while(!Serial.available()); //Wait for user to hit character
+      //setting_escape_character = Serial.read();
+      setting_escape_character = uart_getc();
 
       EEPROM.write(LOCATION_ESCAPE_CHAR, setting_escape_character);
       record_config_file(); //Put this new setting into the config file
@@ -1739,8 +1606,9 @@ void system_menu(void)
       while(choice > 9 || choice < 1)
       {
         PgmPrint("\n\rEnter number of escape characters to look for (1 to 9): ");
-        while(!Serial.available()); //Wait for user to hit character
-        choice = Serial.read() - '0';
+        //while(!Serial.available()); //Wait for user to hit character
+        //choice = Serial.read() - '0';
+        choice = uart_getc() - '0';
       }
 
       setting_max_escape_character = choice;
@@ -1797,13 +1665,13 @@ void system_menu(void)
 void read_config_file(void)
 {
   SdFile rootDirectory;
-  if (!rootDirectory.openRoot(volume)) error("openRoot"); // open the root directory
+  if (!rootDirectory.openRoot(&volume)) error("openRoot"); // open the root directory
 
   char configFileName[13];
   sprintf(configFileName, CFG_FILENAME); //This is the name of the config file. 'config.sys' is probably a bad idea.
 
   //Check to see if we have a config file
-  if (file.open(rootDirectory, configFileName, O_READ)) {
+  if (file.open(&rootDirectory, configFileName, O_READ)) {
     //If we found the config file then load settings from file and push them into EEPROM
 #if DEBUG
     PgmPrintln("Found config file!");
@@ -1995,13 +1863,13 @@ void record_config_file(void)
   //config file will not be found and it will be created in some erroneus directory. The changes to user settings may be lost on the
   //next power cycles. To prevent this, we will open another instance of the file system, then close it down when we are done.
   SdFile rootDirectory;
-  if (!rootDirectory.openRoot(volume)) error("openRoot"); // open the root directory
+  if (!rootDirectory.openRoot(&volume)) error("openRoot"); // open the root directory
 
   char configFileName[13];
   sprintf(configFileName, CFG_FILENAME); //This is the name of the config file. 'config.sys' is probably a bad idea.
 
   //If there is currently a config file, trash it
-  if (file.open(rootDirectory, configFileName, O_WRITE)) {
+  if (file.open(&rootDirectory, configFileName, O_WRITE)) {
 #if DEBUG
     PgmPrintln("Deleting config");
 #endif
@@ -2012,7 +1880,7 @@ void record_config_file(void)
   }
 
   //Create config file
-  if (file.open(rootDirectory, configFileName, O_CREAT | O_APPEND | O_WRITE) == 0) {
+  if (file.open(&rootDirectory, configFileName, O_CREAT | O_APPEND | O_WRITE) == 0) {
     PgmPrintln("Create config failed");
     return;
   }
@@ -2135,8 +2003,8 @@ void check_emergency_reset(void)
 
   //Try to setup the SD card so we can record these new settings
   if (!card.init()) error("card.init"); // initialize the SD card
-  if (!volume.init(card)) error("volume.init"); // initialize a FAT volume
-  if (!currentDirectory.openRoot(volume)) error("openRoot"); // open the root directory
+  if (!volume.init(&card)) error("volume.init"); // initialize a FAT volume
+  if (!currentDirectory.openRoot(&volume)) error("openRoot"); // open the root directory
 
   record_config_file(); //Record new config settings
 
@@ -2328,3 +2196,10 @@ uint8_t wildcmp(const char* wild, const char* string)
 
 //End wildcard functions
 //=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+
+
+
+
+
+
+

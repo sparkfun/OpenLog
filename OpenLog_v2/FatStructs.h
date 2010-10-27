@@ -1,3 +1,22 @@
+/* Arduino SdFat Library
+ * Copyright (C) 2009 by William Greiman
+ *
+ * This file is part of the Arduino SdFat Library
+ *
+ * This Library is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This Library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with the Arduino SdFat Library.  If not, see
+ * <http://www.gnu.org/licenses/>.
+ */
 #ifndef FatStructs_h
 #define FatStructs_h
 /**
@@ -9,10 +28,10 @@
  * http://www.microsoft.com/whdc/system/platform/firmware/fatgen.mspx
  */
 //------------------------------------------------------------------------------
-         /** Value for byte 510 of boot block or MBR */
-#define BOOTSIG0        0X55
-        /** Value for byte 511 of boot block or MBR */
-#define BOOTSIG1        0XAA
+/** Value for byte 510 of boot block or MBR */
+uint8_t const BOOTSIG0 = 0X55;
+/** Value for byte 511 of boot block or MBR */
+uint8_t const BOOTSIG1 = 0XAA;
 //------------------------------------------------------------------------------
 /**
  * \struct partitionTable
@@ -106,7 +125,7 @@ typedef struct masterBootRecord mbr_t;
  * 
  *  The BIOS parameter block describes the physical layout of a FAT volume.
  */
-struct biosParmBlock{
+struct biosParmBlock {
           /**
            * Count of bytes per sector. This value may take on only the
            * following values: 512, 1024, 2048 or 4096
@@ -236,7 +255,7 @@ struct fat32BootSector {
   bpb_t    bpb;
            /** for int0x13 use value 0X80 for hard drive */
   uint8_t  driveNumber;
-           /**used by Windows NT - should be zero for FAT */
+           /** used by Windows NT - should be zero for FAT */
   uint8_t  reserved1;
            /** 0X29 if next three fields are valid */
   uint8_t  bootSignature;
@@ -255,16 +274,16 @@ struct fat32BootSector {
 };
 //------------------------------------------------------------------------------
 // End Of Chain values for FAT entries
-        /** Minimum value for FAT16 EOC.  Use to test for EOC. */
-#define FAT16EOC_MIN 0XFFF8
-        /** Minimum value for FAT32 EOC.  Use to test for EOC. */
-#define FAT32EOC_MIN 0X0FFFFFF8
-        /** FAT16 end of chain value used by Microsoft. */
-#define FAT16EOC 0XFFFF
-        /** FAT32 end of chain value used by Microsoft. */
-#define FAT32EOC 0X0FFFFFFF
-        /** Mask a for FAT32 entry. Entries are 28 bits. */
-#define FAT32MASK 0X0FFFFFFF
+/** FAT16 end of chain value used by Microsoft. */
+uint16_t const FAT16EOC = 0XFFFF;
+/** Minimum value for FAT16 EOC.  Use to test for EOC. */
+uint16_t const FAT16EOC_MIN = 0XFFF8;
+/** FAT32 end of chain value used by Microsoft. */
+uint32_t const FAT32EOC = 0X0FFFFFFF;
+/** Minimum value for FAT32 EOC.  Use to test for EOC. */
+uint32_t const FAT32EOC_MIN = 0X0FFFFFF8;
+/** Mask a for FAT32 entry. Entries are 28 bits. */
+uint32_t const FAT32MASK = 0X0FFFFFFF;
 
 /** Type name for fat32BootSector */
 typedef struct fat32BootSector fbs_t;
@@ -349,46 +368,51 @@ struct directoryEntry {
   uint32_t fileSize;
 };
 //------------------------------------------------------------------------------
-// Macros for directory entries
+// Definitions for directory entries
 //
-        /** Type name for directoryEntry */
+/** Type name for directoryEntry */
 typedef struct directoryEntry dir_t;
-        /** escape for name[0] = 0XE5 */
-#define DIR_NAME_0XE5          0X05
-        /** name[0] value for entry that is free after being "deleted" */
-#define DIR_NAME_DELETED       0XE5
-        /** name[0] value for entry that is free and no allocated entries follow */
-#define DIR_NAME_FREE          0X00
-        /** file is read-only */
-#define DIR_ATT_READ_ONLY      0X01
-        /** File should hidden in directory listings */
-#define DIR_ATT_HIDDEN         0X02
-        /** Entry is for a system file */
-#define DIR_ATT_SYSTEM         0X04
-        /** Directory entry contains the volume label */
-#define DIR_ATT_VOLUME_ID      0X08
-        /** Entry is for a directory */
-#define DIR_ATT_DIRECTORY      0X10
-       /** Old DOS archive bit for backup support */
-#define DIR_ATT_ARCHIVE        0X20
-       /** Test value for long name entry.  Test is
-           d->attributes & DIR_ATT_LONG_NAME_MASK) == DIR_ATT_LONG_NAME. */
-#define DIR_ATT_LONG_NAME      0X0F
-        /** Test mask for long name entry */
-#define DIR_ATT_LONG_NAME_MASK 0X3F
-        /** defined attribute bits */
-#define DIR_ATT_DEFINED_BITS   0X3F
-        /** Directory entry is part of a long name */
-#define DIR_IS_LONG_NAME(dir)\
-           (((dir).attributes & DIR_ATT_LONG_NAME_MASK) == DIR_ATT_LONG_NAME)
-        /** Mask for file/subdirectory tests */
-#define DIR_ATT_FILE_TYPE_MASK (DIR_ATT_VOLUME_ID | DIR_ATT_DIRECTORY)
-        /** Directory entry is for a file */
-#define DIR_IS_FILE(dir) (((dir).attributes & DIR_ATT_FILE_TYPE_MASK) == 0)
-        /** Directory entry is for a subdirectory */
-#define DIR_IS_SUBDIR(dir)\
-            (((dir).attributes & DIR_ATT_FILE_TYPE_MASK) == DIR_ATT_DIRECTORY)
-        /** Directory entry is for a file or subdirectory */
-#define DIR_IS_FILE_OR_SUBDIR(dir) (((dir).attributes & DIR_ATT_VOLUME_ID) == 0)
-
-#endif //FatStructs_h
+/** escape for name[0] = 0XE5 */
+uint8_t const DIR_NAME_0XE5 = 0X05;
+/** name[0] value for entry that is free after being "deleted" */
+uint8_t const DIR_NAME_DELETED = 0XE5;
+/** name[0] value for entry that is free and no allocated entries follow */
+uint8_t const DIR_NAME_FREE = 0X00;
+/** file is read-only */
+uint8_t const DIR_ATT_READ_ONLY = 0X01;
+/** File should hidden in directory listings */
+uint8_t const DIR_ATT_HIDDEN = 0X02;
+/** Entry is for a system file */
+uint8_t const DIR_ATT_SYSTEM = 0X04;
+/** Directory entry contains the volume label */
+uint8_t const DIR_ATT_VOLUME_ID = 0X08;
+/** Entry is for a directory */
+uint8_t const DIR_ATT_DIRECTORY = 0X10;
+/** Old DOS archive bit for backup support */
+uint8_t const DIR_ATT_ARCHIVE = 0X20;
+/** Test value for long name entry.  Test is
+  (d->attributes & DIR_ATT_LONG_NAME_MASK) == DIR_ATT_LONG_NAME. */
+uint8_t const DIR_ATT_LONG_NAME = 0X0F;
+/** Test mask for long name entry */
+uint8_t const DIR_ATT_LONG_NAME_MASK = 0X3F;
+/** defined attribute bits */
+uint8_t const DIR_ATT_DEFINED_BITS = 0X3F;
+/** Directory entry is part of a long name */
+static inline uint8_t DIR_IS_LONG_NAME(const dir_t* dir) {
+  return (dir->attributes & DIR_ATT_LONG_NAME_MASK) == DIR_ATT_LONG_NAME;
+}
+/** Mask for file/subdirectory tests */
+uint8_t const DIR_ATT_FILE_TYPE_MASK = (DIR_ATT_VOLUME_ID | DIR_ATT_DIRECTORY);
+/** Directory entry is for a file */
+static inline uint8_t DIR_IS_FILE(const dir_t* dir) {
+  return (dir->attributes & DIR_ATT_FILE_TYPE_MASK) == 0;
+}
+/** Directory entry is for a subdirectory */
+static inline uint8_t DIR_IS_SUBDIR(const dir_t* dir) {
+  return (dir->attributes & DIR_ATT_FILE_TYPE_MASK) == DIR_ATT_DIRECTORY;
+}
+/** Directory entry is for a file or subdirectory */
+static inline uint8_t DIR_IS_FILE_OR_SUBDIR(const dir_t* dir) {
+  return (dir->attributes & DIR_ATT_VOLUME_ID) == 0;
+}
+#endif  // FatStructs_h
