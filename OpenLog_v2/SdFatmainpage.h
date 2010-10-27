@@ -85,7 +85,7 @@ uses a 74AHC125N.  Gravitech sells SD and MicroSD Card Adapters based on the
 
 If you are using a resistor based level shifter and are having problems try
 setting the SPI bus frequency to 4 MHz.  This can be done by using 
-card.int(true) to initialize the SD card.
+card.init(SPI_HALF_SPEED) to initialize the SD card.
 
 \section comment Bugs and Comments
 

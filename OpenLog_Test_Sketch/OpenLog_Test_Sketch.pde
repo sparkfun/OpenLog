@@ -50,7 +50,7 @@ void setup()
 
 void loop() 
 { 
-  int testAmt = 4; 
+  int testAmt = 10; 
   //At 9600, testAmt of 4 takes about 1 minute, 10 takes about 3 minutes
   //At 57600, testAmt of 10 takes about 1 minute, 40 takes about 5 minutes
   //testAmt of 10 will push 111,000 characters/bytes. With header and footer strings, total is 111,052
@@ -73,6 +73,12 @@ void loop()
         Serial.println(":abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-!#");
         //delay(50);
       }  
+
+    if(digitalRead(ledPin) == 0)
+      digitalWrite(ledPin, HIGH);
+    else
+      digitalWrite(ledPin, LOW);
+
     }
   }
 
