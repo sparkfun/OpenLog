@@ -112,7 +112,7 @@
  
  Backspace is broken - ringp, I saw this fix in one of your commits, but looking at the code, I don't see how it is supposed to work. Either way, we still
  get 0x08 when trying to backspace.
-  
+
  New sdfatlib doesn't have SdFat.cpp so fileInfo doesn't work. These function calls are marked with //Error
  
  I have chosen to dis-allow deprecated functions:
@@ -2215,10 +2215,3 @@ uint8_t wildcmp(const char* wild, const char* string)
 
 //End wildcard functions
 //=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
-
-
-
-
-
-
-
