@@ -155,6 +155,32 @@
  
  http://www.sdcard.org/consumers/formatter/ is the site for SD card formatting. It looks like this program takes a guess at the correct block size. This could
  help a lot in the future.
+
+
+ v2.4 Merged ringp updates. Commands cd, rm, ls work again! New "rm -rf" command to remove directory and its files.
+
+ 29028 bytes of 30720 (yikes).
+ 
+ Thanks ringp! Great work.
+
+ Remember - we had to completely butcher HardwareSerial.cpp so a normal Arduino installation will not work. 
+ C:\arduino-xxxx\hardware\arduino\cores\arduino\HardwareSerial.cpp
+ I've added the modified HardwareSerial.cpp to the 
+ 
+ Testing at 57600
+ 1GB: 110490/111000, 110490/111000
+ 8GB: 111000/111000, 111000/111000, 111000/111000
+ 16GB: 83890/111000, 84908/111000
+ The 16GB card with tons of files continue to have problems but the other cards (FAT and FAT32) are acceptable. Whenever possible, use a clean, 
+ empty, freshly formatted card.
+ 
+ "rm -rf mydirectory" to remove a directory and all its files
+ 
+ Windows 7 stores the Arduino hex file is an aweful place. Something like:
+ C:\Users\Main\AppData\Local\Temp\build3390340147786739225.tmp\OpenLog_v2.cpp.hex
+ 
+ Added HardwareSerial.cpp and a readme to the main trunk.
+ Added OpenLog_v2.cpp.hex to the main trunk.
  
  */
 
