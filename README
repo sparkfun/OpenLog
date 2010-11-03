@@ -22,3 +22,4 @@ v2.11 Tested with 16GB microSD. Fixed issues 30 & 34. Re-enable power save.
 v2.2 Modified append_file() to use a single buffer. Increased HardwareSerial.cpp buffer to 512 bytes.
 v2.21 ringp fork brought in. rm dir, cd .., and wildcards now work!
 v2.3 Migrated to v10.10.10 of sdfatlib. Moved to inline RX interrupt and buffer.
+v2.4 Merged ringp updates. Commands cd, rm, ls work again!
