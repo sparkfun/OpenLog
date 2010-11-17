@@ -23,3 +23,4 @@ v2.2 Modified append_file() to use a single buffer. Increased HardwareSerial.cpp
 v2.21 ringp fork brought in. rm dir, cd .., and wildcards now work!
 v2.3 Migrated to v10.10.10 of sdfatlib. Moved to inline RX interrupt and buffer.
 v2.4 Merged ringp updates. Commands cd, rm, ls work again!
+v2.41 Power loss bug fixed. Adding support for 38400bps for testing with SparkFum 9DOF IMU logging. 

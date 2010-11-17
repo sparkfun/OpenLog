@@ -182,6 +182,15 @@
  Added HardwareSerial.cpp and a readme to the main trunk.
  Added OpenLog_v2.cpp.hex to the main trunk.
  
+ 
+ v2.41 Power loss bug fixed. Adding support for 38400bps for testing with SparkFum 9DOF IMU logging. 
+ 
+ 29124 bytes of 30720 (yikes)
+ 
+ Found a bug in the append_file routine. If the unit is actively logging, file.writes are flying by quickly. But if OpenLog loses power, none of
+ the data is recorded because there is no file.sync. Data would only get recorded if the unit went idle or if user entered escape command. This
+ has since been fixed with two file.sync() commands.
+ 
  */
 
 #include "SdFat.h"
@@ -251,6 +260,7 @@ char folderTree[FOLDER_TRACK_DEPTH][12];
 #define BAUD_115200	3
 #define BAUD_4800	4
 #define BAUD_19200	5
+#define BAUD_38400	6
 
 #define MODE_NEWLOG	0
 #define MODE_SEQLOG     1
@@ -355,6 +365,7 @@ void setup(void)
   if(setting_uart_speed == BAUD_4800) Serial.begin(4800);
   if(setting_uart_speed == BAUD_9600) Serial.begin(9600);
   if(setting_uart_speed == BAUD_19200) Serial.begin(19200);
+  if(setting_uart_speed == BAUD_38400) Serial.begin(38400);
   if(setting_uart_speed == BAUD_57600) Serial.begin(57600);
   if(setting_uart_speed == BAUD_115200) Serial.begin(115200);
   Serial.print("1");
@@ -555,7 +566,7 @@ uint8_t append_file(char* file_name)
   sei(); //Enable interrupts
 
   //Start recording incoming characters
-  //  //HardwareSerial.cpp has a buffer tied to the interrupt. We increased this buffer to 512 bytes
+  //HardwareSerial.cpp has a buffer tied to the interrupt. We increased this buffer to 512 bytes
   //As characters come in, we read them in and record them to FAT.
   while(1){
     uint16_t timeout_counter = 0;
@@ -616,7 +627,7 @@ uint8_t append_file(char* file_name)
         //Now power down until new characters to arrive
         while(checkedSpot == rxSpot){
           digitalWrite(STAT1, LOW); //Turn off stat LED to save power
-          //sleep_mode(); //Stop everything and go to sleep. Wake up if serial character received
+          sleep_mode(); //Stop everything and go to sleep. Wake up if serial character received
         }
       }
       delay(1); //Hang out for a ms
@@ -641,11 +652,13 @@ uint8_t append_file(char* file_name)
 
     if(checkedSpot == (RX_BUFF_SIZE/2)) { //We've finished checking the first half the buffer
       file.write(rxBuffer, RX_BUFF_SIZE/2); //Record first half the buffer
+      file.sync(); //Push these new file.writes to the SD card
     }
 
     if(checkedSpot == RX_BUFF_SIZE){ //We've finished checking the second half the buffer
       checkedSpot = 0;
       file.write(rxBuffer + (RX_BUFF_SIZE/2), RX_BUFF_SIZE/2); //Record second half the buffer
+      file.sync(); //Push these new file.writes to the SD card
     }
 
     STAT1_PORT ^= (1<<STAT1); //Toggle the STAT1 LED each time we receive a character
@@ -1440,7 +1453,7 @@ void read_system_settings(void)
 
 void print_menu(void)
 {
-  PgmPrintln("OpenLog v2.3");
+  PgmPrintln("OpenLog v2.41");
   PgmPrintln("Available commands:");
   PgmPrintln("new <file>\t\t: Creates <file>");
   PgmPrintln("append <file>\t\t: Appends text to end of <file>. The text is read from the UART in a stream and is not echoed. Finish by sending Ctrl+z (ASCII 26)");
@@ -1477,6 +1490,7 @@ void baud_menu(void)
     if(uart_speed == BAUD_2400) PgmPrint("24");
     if(uart_speed == BAUD_9600) PgmPrint("96");
     if(uart_speed == BAUD_19200) PgmPrint("192");
+    if(uart_speed == BAUD_38400) PgmPrint("384");
     if(uart_speed == BAUD_57600) PgmPrint("576");
     if(uart_speed == BAUD_115200) PgmPrint("1152");
     PgmPrintln("00 bps");
@@ -1486,8 +1500,9 @@ void baud_menu(void)
     PgmPrintln("2) 4800 bps");
     PgmPrintln("3) 9600 bps");
     PgmPrintln("4) 19200 bps");
-    PgmPrintln("5) 57600 bps");
-    PgmPrintln("6) 115200 bps");
+    PgmPrintln("5) 38400 bps");
+    PgmPrintln("6) 57600 bps");
+    PgmPrintln("7) 115200 bps");
     PgmPrintln("x) Exit");
 
     //print prompt
@@ -1542,6 +1557,16 @@ void baud_menu(void)
     }
     if(strcmp_P(command, PSTR("5")) == 0)
     {
+      PgmPrintln("Going to 38400bps...");
+
+      //Set baud rate to 38400
+      EEPROM.write(LOCATION_BAUD_SETTING, BAUD_38400);
+      record_config_file(); //Put this new setting into the config file
+      blink_error(ERROR_NEW_BAUD);
+      return;
+    }
+    if(strcmp_P(command, PSTR("6")) == 0)
+    {
       PgmPrintln("Going to 57600bps...");
 
       //Set baud rate to 57600
@@ -1550,7 +1575,7 @@ void baud_menu(void)
       blink_error(ERROR_NEW_BAUD);
       return;
     }
-    if(strcmp_P(command, PSTR("6")) == 0)
+    if(strcmp_P(command, PSTR("7")) == 0)
     {
       PgmPrintln("Going to 115200bps...");
 
@@ -1789,6 +1814,7 @@ void read_config_file(void)
         else if( strcmp(new_setting, "4800") == 0) new_system_baud = BAUD_4800;
         else if( strcmp(new_setting, "9600") == 0) new_system_baud = BAUD_9600;
         else if( strcmp(new_setting, "19200") == 0) new_system_baud = BAUD_19200;
+        else if( strcmp(new_setting, "38400") == 0) new_system_baud = BAUD_38400;
         else if( strcmp(new_setting, "57600") == 0) new_system_baud = BAUD_57600;
         else if( strcmp(new_setting, "115200") == 0) new_system_baud = BAUD_115200;
         else new_system_baud = BAUD_9600; //Default is 9600bps
@@ -1826,6 +1852,7 @@ void read_config_file(void)
     if(new_system_baud == BAUD_4800) strcpy(temp_string, "4800");
     if(new_system_baud == BAUD_9600) strcpy(temp_string, "9600");
     if(new_system_baud == BAUD_19200) strcpy(temp_string, "19200");
+    if(new_system_baud == BAUD_38400) strcpy(temp_string, "38400");
     if(new_system_baud == BAUD_57600) strcpy(temp_string, "57600");
     if(new_system_baud == BAUD_115200) strcpy(temp_string, "115200");
 
@@ -1867,6 +1894,7 @@ void read_config_file(void)
       if(setting_uart_speed == BAUD_4800) Serial.begin(4800);
       if(setting_uart_speed == BAUD_9600) Serial.begin(9600);
       if(setting_uart_speed == BAUD_19200) Serial.begin(19200);
+      if(setting_uart_speed == BAUD_38400) Serial.begin(38400);
       if(setting_uart_speed == BAUD_57600) Serial.begin(57600);
       if(setting_uart_speed == BAUD_115200) Serial.begin(115200);
 
@@ -1966,6 +1994,7 @@ void record_config_file(void)
     if(current_system_baud == BAUD_4800) strcpy(settings_string, "4800");
     if(current_system_baud == BAUD_9600) strcpy(settings_string, "9600");
     if(current_system_baud == BAUD_19200) strcpy(settings_string, "19200");
+    if(current_system_baud == BAUD_38400) strcpy(settings_string, "38400");
     if(current_system_baud == BAUD_57600) strcpy(settings_string, "57600");
     if(current_system_baud == BAUD_115200) strcpy(settings_string, "115200");
 
