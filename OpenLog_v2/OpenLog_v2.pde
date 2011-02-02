@@ -112,7 +112,7 @@
  
  Backspace is broken - ringp, I saw this fix in one of your commits, but looking at the code, I don't see how it is supposed to work. Either way, we still
  get 0x08 when trying to backspace.
-
+ 
  New sdfatlib doesn't have SdFat.cpp so fileInfo doesn't work. These function calls are marked with //Error
  
  I have chosen to dis-allow deprecated functions:
@@ -155,14 +155,14 @@
  
  http://www.sdcard.org/consumers/formatter/ is the site for SD card formatting. It looks like this program takes a guess at the correct block size. This could
  help a lot in the future.
-
-
+ 
+ 
  v2.4 Merged ringp updates. Commands cd, rm, ls work again! New "rm -rf" command to remove directory and its files.
-
+ 
  29028 bytes of 30720 (yikes).
  
  Thanks ringp! Great work.
-
+ 
  Remember - we had to completely butcher HardwareSerial.cpp so a normal Arduino installation will not work. 
  C:\arduino-xxxx\hardware\arduino\cores\arduino\HardwareSerial.cpp
  I've added the modified HardwareSerial.cpp to the 
@@ -191,6 +191,20 @@
  the data is recorded because there is no file.sync. Data would only get recorded if the unit went idle or if user entered escape command. This
  has since been fixed with two file.sync() commands.
  
+
+ v2.5 Improved 'read' command. Added 'reset' command.
+ 
+ 28782 bytes of 30720 (yikes)
+ 
+ Modified the read command so that we can print extended ASCII characters. The function was also failing to print any value over 127
+ (limited to signed 8 bits - boo). Thank you wilafau! You proposed excellent, easy fixes.
+ 
+ Added raw command during print operation. This allows for non-visible and extended ASCII characters to be printed correctly, if need be.
+ 
+ Issuing 'reset' command causes OpenLog to reset and re-read the config file. This is important if you want to change the config file then restart.
+ 
+ Removed some of the extraneous prints from the help menu to save on space.
+ 
  */
 
 #include "SdFat.h"
@@ -201,6 +215,7 @@
 #include <ctype.h> //Needed for isdigit
 #include <avr/sleep.h> //Needed for sleep_mode
 #include <avr/power.h> //Needed for powering down perihperals such as the ADC/TWI and Timers
+//#include <avr/wdt.h> //Needed for the reset command - uses watch dog timer to reset IC
 
 //Debug turns on (1) or off (0) a bunch of verbose debug statements. Normally use (0)
 //#define DEBUG  1
@@ -227,6 +242,9 @@
 //#define RX_BUFF_SIZE  256 //Drops lots
 char rxBuffer[RX_BUFF_SIZE];
 int rxSpot;
+
+//#define Reset_AVR() wdt_enable(WDTO_1S); while(1) {} //Correct way of resetting the ATmega, but doesn't work with Arduino pre-Optiboot bootloader
+void(* Reset_AVR) (void) = 0; //Dirty way of resetting the ATmega, but it works for now
 
 //The very important receive interrupt handler
 SIGNAL(USART_RX_vect)
@@ -288,11 +306,11 @@ int statled2 = 13; //This is the SPI LED, indicating SD traffic
 #define ERROR_NEW_BAUD	5
 
 #if !DEBUG
-  // Using OpenLog in an embedded environment
-  // only if not in debug mode. The reason for this
-  // is that we are out of space if the simple embedded is
-  // included
-  #define INCLUDE_SIMPLE_EMBEDDED
+// Using OpenLog in an embedded environment
+// only if not in debug mode. The reason for this
+// is that we are out of space if the simple embedded is
+// included
+#define INCLUDE_SIMPLE_EMBEDDED
 #endif
 
 #define ECHO			0x01
@@ -1003,29 +1021,37 @@ void command_shell(void)
         if ((command_arg = is_number(command_arg, strlen(command_arg))) != 0)
           readAmount = strtolong(command_arg);
 
-      //Argument 5: Should we print ASCII or HEX? 1 = ASCII, 2 = HEX
+      //Argument 5: Should we print ASCII or HEX? 1 = ASCII, 2 = HEX, 3 = RAW
       uint32_t printType = 1; //Default to ASCII
       if ((command_arg = get_cmd_arg(4)) != 0)
         if ((command_arg = is_number(command_arg, strlen(command_arg))) != 0)
           printType = strtolong(command_arg);
 
       //Print file contents from current seek position to the end (readAmount)
-      int8_t c;
+      uint8_t c;
+      int16_t v;
       int16_t readSpot = 0;
-      while ((c = file.read()) > 0) {
+      while ((v = file.read()) > 0) {
+        //file.read() returns a 16 bit character. We want to be able to print extended ASCII
+        //So we need 8 bit unsigned.
+        c = v; //Force the 16bit signed variable into an 8bit unsigned
+
         if(++readSpot > readAmount) break;
         if(printType == 1) { //Printing ASCII
           //Test character to see if it is visible, if not print '.'
           if(c >= ' ' && c < 127)
-            Serial.print((char)c); //Regular ASCII
+            Serial.print(c); //Regular ASCII
           else if (c == '\n' || c == '\r')
-            Serial.print((char)c); //Go ahead and print the carriage returns and new lines
+            Serial.print(c); //Go ahead and print the carriage returns and new lines
           else
             Serial.print('.'); //For non visible ASCII characters, print a .
         }
         else if (printType == 2) {
-          Serial.print((char)c, HEX); //Print in HEX
+          Serial.print(c, HEX); //Print in HEX
           Serial.print(" ");
+        }
+        else if (printType == 3) {
+          Serial.write(c); //Print raw
         }
 
       }
@@ -1198,6 +1224,10 @@ void command_shell(void)
 #ifdef INCLUDE_SIMPLE_EMBEDDED
       command_succedded = 1;
 #endif
+    }
+    else if(strncmp_P(command_arg, PSTR("reset"), 7) == 0)
+    {
+      Reset_AVR();
     }
     else if(strncmp_P(command_arg, PSTR("new"), 3) == 0)
     {
@@ -1453,21 +1483,22 @@ void read_system_settings(void)
 
 void print_menu(void)
 {
-  PgmPrintln("OpenLog v2.41");
-  PgmPrintln("Available commands:");
+  PgmPrintln("OpenLog v2.5");
+  PgmPrintln("Basic commands:");
   PgmPrintln("new <file>\t\t: Creates <file>");
   PgmPrintln("append <file>\t\t: Appends text to end of <file>. The text is read from the UART in a stream and is not echoed. Finish by sending Ctrl+z (ASCII 26)");
-  PgmPrintln("write <file> <offset>\t: Writes text to <file>, starting from <offset>. The text is read from the UART, line by line. Finish with an empty line");
-  PgmPrintln("rm <file>\t\t: Deletes <file>. Use wildcard to do a wildcard removal of files");
+  //PgmPrintln("write <file> <offset>\t: Writes text to <file>, starting from <offset>. The text is read from the UART, line by line. Finish with an empty line");
+  //PgmPrintln("rm <file>\t\t: Deletes <file>. Use wildcard to do a wildcard removal of files");
   PgmPrintln("md <directory>\t: Creates a directory called <directory>");
-  PgmPrintln("cd <directory>\t\t: Changes current working directory to <directory>");
-  PgmPrintln("cd ..\t\t: Changes to lower directory in tree");
+  //PgmPrintln("cd <directory>\t\t: Changes current working directory to <directory>");
+  //PgmPrintln("cd ..\t\t: Changes to lower directory in tree");
   PgmPrintln("ls\t\t\t: Shows the content of the current directory. Use wildcard to do a wildcard listing of files in current directory");
   PgmPrintln("read <file> <start> <length> <type>\t\t: Writes ASCII <length> parts of <file> to the terminal starting at <start>. Omit <start> and <length> to read whole file. <type> 1 prints in ASCII, 2 in HEX.");
   PgmPrintln("size <file>\t\t: Write size of file to terminal");
   PgmPrintln("disk\t\t\t: Shows card manufacturer, status, filesystem capacity and free storage space");
-  PgmPrintln("init\t\t\t: Reinitializes and reopens the memory card");
-  PgmPrintln("sync\t\t\t: Ensures all buffered data is written to the card");
+  //PgmPrintln("init\t\t\t: Reinitializes and reopens the memory card");
+  //PgmPrintln("sync\t\t\t: Ensures all buffered data is written to the card");
+  PgmPrintln("reset\t\t\t: Causes unit to reset and using any new parameters in config file");
 
   PgmPrintln("\n\rMenus:");
   PgmPrintln("set\t\t\t: Menu to configure system mode");
@@ -2270,3 +2301,4 @@ uint8_t wildcmp(const char* wild, const char* string)
 
 //End wildcard functions
 //=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+
