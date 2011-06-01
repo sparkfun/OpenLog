@@ -204,6 +204,17 @@
  Issuing 'reset' command causes OpenLog to reset and re-read the config file. This is important if you want to change the config file then restart.
  
  Removed some of the extraneous prints from the help menu to save on space.
+
+
+ v2.51 Improved command prompt parsing (now ignores '\n')
+ 
+ We now ignore the \n character when parsing characters from the command prompt. This makes it easier to create code on a microcontroller that
+ correctly controls OpenLog. Previously, println or sprintf commands were adding a \n to the end of the string that would confuse OpenLog. One
+ way around this if you have previous versions is this
+ sprintf(buff, "new blah.txt\r");
+ Serial.print(buff); //No println, use \r in string instead
+ 
+ Also - added a CommandTest sketch to demonstrate how you can control OpenLog from a microcontroller / automate the command prompt
  
  */
 
@@ -1418,6 +1429,12 @@ uint8_t read_line(char* buffer, uint8_t buffer_length)
       Serial.println();
       buffer[read_length] = '\0';
       break;
+    }
+    else if (c == '\n') {
+      //Do nothing - ignore newlines
+      //This was added to v2.51 to make command line control easier from a micro
+      //You never know what fprintf or sprintf is going to throw at the buffer
+      //See issue 66: https://github.com/nseidle/OpenLog/issues/66
     }
     else {
       buffer[read_length] = c;
