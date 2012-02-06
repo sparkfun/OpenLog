@@ -1042,7 +1042,7 @@ void command_shell(void)
       uint8_t c;
       int16_t v;
       int16_t readSpot = 0;
-      while ((v = file.read()) > 0) {
+      while ((v = file.read()) >= 0) {
         //file.read() returns a 16 bit character. We want to be able to print extended ASCII
         //So we need 8 bit unsigned.
         c = v; //Force the 16bit signed variable into an 8bit unsigned
