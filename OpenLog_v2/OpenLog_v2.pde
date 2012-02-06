@@ -679,32 +679,33 @@ uint8_t append_file(char* file_name)
 
     checkedSpot++;
 
-    if(checkedSpot == (RX_BUFF_SIZE/2)) { //We've finished checking the first half the buffer
-      file.write(rxBuffer, RX_BUFF_SIZE/2); //Record first half the buffer
-      file.sync(); //Push these new file.writes to the SD card
-    }
+    if (escape_chars_received < setting_max_escape_character) {
+      if(checkedSpot == (RX_BUFF_SIZE/2)) { //We've finished checking the first half the buffer
+        file.write(rxBuffer, RX_BUFF_SIZE/2); //Record first half the buffer
+        file.sync(); //Push these new file.writes to the SD card
+      }
 
-    if(checkedSpot == RX_BUFF_SIZE){ //We've finished checking the second half the buffer
-      checkedSpot = 0;
-      file.write(rxBuffer + (RX_BUFF_SIZE/2), RX_BUFF_SIZE/2); //Record second half the buffer
-      file.sync(); //Push these new file.writes to the SD card
+      if(checkedSpot == RX_BUFF_SIZE){ //We've finished checking the second half the buffer
+        checkedSpot = 0;
+        file.write(rxBuffer + (RX_BUFF_SIZE/2), RX_BUFF_SIZE/2); //Record second half the buffer
+        file.sync(); //Push these new file.writes to the SD card
+      }
     }
 
     STAT1_PORT ^= (1<<STAT1); //Toggle the STAT1 LED each time we receive a character
   } //End while - escape character received or error
 
   //Upon receiving the escape character, we may still have stuff left in the buffer, record the last of the buffer to memory
-  if(checkedSpot == 0 || checkedSpot == (RX_BUFF_SIZE/2))
-  {
-    //Do nothing, we already recorded the buffers right before catching the escape character
-  }
-  else if(checkedSpot < (RX_BUFF_SIZE/2))
-  {
-    file.write(rxBuffer, checkedSpot); //Record first half the buffer
-  }
-  else //checkedSpot > (RX_BUFF_SIZE/2)
-  {
-    file.write(rxBuffer + (RX_BUFF_SIZE/2), checkedSpot - (RX_BUFF_SIZE/2)); //Record second half the buffer
+  if (escape_chars_received >= setting_max_escape_character) {
+    int cs2 = checkedSpot - (setting_max_escape_character - 1);
+    if(checkedSpot <= (RX_BUFF_SIZE/2) && cs2 > 0)
+    {
+      file.write(rxBuffer, cs2); //Record first half the buffer, minus the
+    }
+    else if (cs2 > (RX_BUFF_SIZE/2)) //checkedSpot > (RX_BUFF_SIZE/2)
+    {
+      file.write(rxBuffer + (RX_BUFF_SIZE/2), cs2 - (RX_BUFF_SIZE/2)); //Record second half the buffer
+    }
   }
 
   file.sync();
