@@ -679,6 +679,9 @@ uint8_t append_file(char* file_name)
 
     checkedSpot++;
 
+    // Note that if escape_chars_received > 0 yet we are at the border of a buffer
+    // we can still end up with escape_chars_received in file if the sequence is
+    // finished across the buffer boundary.
     if (escape_chars_received < setting_max_escape_character) {
       if(checkedSpot == (RX_BUFF_SIZE/2)) { //We've finished checking the first half the buffer
         file.write(rxBuffer, RX_BUFF_SIZE/2); //Record first half the buffer
@@ -696,16 +699,23 @@ uint8_t append_file(char* file_name)
   } //End while - escape character received or error
 
   //Upon receiving the escape character, we may still have stuff left in the buffer, record the last of the buffer to memory
+  int cs2 = checkedSpot;
+  // if needed back out the escape sequence to avoid it ending up in the file
   if (escape_chars_received >= setting_max_escape_character) {
-    int cs2 = checkedSpot - (setting_max_escape_character - 1);
-    if(checkedSpot <= (RX_BUFF_SIZE/2) && cs2 > 0)
-    {
-      file.write(rxBuffer, cs2); //Record first half the buffer, minus the
-    }
-    else if (cs2 > (RX_BUFF_SIZE/2)) //checkedSpot > (RX_BUFF_SIZE/2)
-    {
-      file.write(rxBuffer + (RX_BUFF_SIZE/2), cs2 - (RX_BUFF_SIZE/2)); //Record second half the buffer
-    }
+    cs2 = checkedSpot - (setting_max_escape_character - 1);
+  }
+
+  if(checkedSpot <= (RX_BUFF_SIZE/2) && cs2 > 0)
+  {
+    file.write(rxBuffer, cs2); //Record first half the buffer, minus the
+  }
+  else if (cs2 > (RX_BUFF_SIZE/2)) // implied: checkedSpot > (RX_BUFF_SIZE/2)
+  {
+    file.write(rxBuffer + (RX_BUFF_SIZE/2), cs2 - (RX_BUFF_SIZE/2)); //Record second half the buffer
+  }
+  else
+  {
+    // There were only escape characters. Nothing to write.
   }
 
   file.sync();
