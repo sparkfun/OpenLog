@@ -1,0 +1,1 @@
+This example sketch shows how to create a random file on OpenLog, write some text and variables to it, then read it back to the terminal. Relates to issue #95: https://github.com/nseidle/OpenLog/issues/95
