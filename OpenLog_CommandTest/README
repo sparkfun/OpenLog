@@ -1,0 +1,1 @@
+This example code shows how to control the OpenLog command line from an Arduino. This code assumes the OpenLog is set to operate at 9600bps in NewLog mode, meaning OpenLog should power up and output '12<'. This code then sends the three escape characters and then sends the commands to create a new random file called nate###.txt where ### is a random number from 0 to 999.

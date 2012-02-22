@@ -38,9 +38,9 @@ void setup()
 { 
   pinMode(ledPin, OUTPUT);     
 
-  //Serial.begin(9600); //9600bps is default for OpenLog
+  Serial.begin(9600); //9600bps is default for OpenLog
   //Serial.begin(57600); //Much faster serial, used for testing buffer overruns on OpenLog
-  Serial.begin(115200); //Much faster serial, used for testing buffer overruns on OpenLog
+  //Serial.begin(115200); //Much faster serial, used for testing buffer overruns on OpenLog
 
   delay(1000); //Wait a second for OpenLog to init
 
@@ -50,7 +50,7 @@ void setup()
 
 void loop() 
 { 
-  int testAmt = 10; 
+  int testAmt = 4;
   //At 9600, testAmt of 4 takes about 1 minute, 10 takes about 3 minutes
   //At 57600, testAmt of 10 takes about 1 minute, 40 takes about 5 minutes
   //testAmt of 10 will push 111,000 characters/bytes. With header and footer strings, total is 111,052
@@ -62,7 +62,7 @@ void loop()
     for(int k = 33; k < 43 ; k++)
     {
       //Print one line of 110 characters with marker in the front (markers go from '!' to '*')
-      Serial.print(k, BYTE); //Print the ASCII value directly: ! then " then #, etc
+      Serial.write(k); //Print the ASCII value directly: ! then " then #, etc
       Serial.println(":abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-!#");
       //delay(50);
   
@@ -93,8 +93,8 @@ void loop()
   while(1)
   {
     digitalWrite(ledPin, HIGH);   // set the LED on
-    delay(1000);                  // wait for a second
+    delay(100);                  // wait for a second
     digitalWrite(ledPin, LOW);    // set the LED off
-    delay(1000);                  // wait for a second
+    delay(100);                  // wait for a second
   }
 } 
