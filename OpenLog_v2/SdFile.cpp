@@ -1376,3 +1376,82 @@ void SdFile::writeln_P(PGM_P str) {
   write_P(str);
   println();
 }
+
+bool SdFile::rename(SdFile* dirFile, const char* newPath) {
+  dir_t entry;
+  uint32_t dirCluster = 0;
+  SdFile file;
+  dir_t* d;
+
+  // must be an open file or subdirectory
+  if (!(isFile() || isSubDir())) goto fail;
+
+  // can't move file
+  if (vol_ != dirFile->vol_) goto fail;
+
+  // sync() and cache directory entry
+  sync();
+  d = cacheDirEntry(SdVolume::CACHE_FOR_WRITE);
+  if (!d) goto fail;
+
+  // save directory entry
+  memcpy(&entry, d, sizeof(entry));
+
+  // mark entry deleted
+  d->name[0] = DIR_NAME_DELETED;
+
+  // make directory entry for new path
+  if (isFile()) {
+    if (!file.open(dirFile, newPath, O_CREAT | O_EXCL | O_WRITE)) {
+      goto restore;
+    }
+  } else {
+    // don't create missing path prefix components
+    if (!file.makeDir(dirFile, newPath)) {
+      goto restore;
+    }
+    // save cluster containing new dot dot
+    dirCluster = file.firstCluster_;
+  }
+  // change to new directory entry
+  dirBlock_ = file.dirBlock_;
+  dirIndex_ = file.dirIndex_;
+
+  // mark closed to avoid possible destructor close call
+  file.type_ = FAT_FILE_TYPE_CLOSED;
+
+  // cache new directory entry
+  d = cacheDirEntry(SdVolume::CACHE_FOR_WRITE);
+  if (!d) goto fail;
+
+  // copy all but name field to new directory entry
+  memcpy(&d->attributes, &entry.attributes, sizeof(entry) - sizeof(d->name));
+
+  // update dot dot if directory
+  if (dirCluster) {
+    // get new dot dot
+    uint32_t block = vol_->clusterStartBlock(dirCluster);
+    if (!vol_->cacheRawBlock(block, SdVolume::CACHE_FOR_READ)) goto fail;
+    memcpy(&entry, &vol_->cacheBuffer_.dir[1], sizeof(entry));
+
+    // free unused cluster
+    if (!vol_->freeChain(dirCluster)) goto fail;
+
+    // store new dot dot
+    block = vol_->clusterStartBlock(firstCluster_);
+    if (!vol_->cacheRawBlock(block, SdVolume::CACHE_FOR_WRITE)) goto fail;
+    memcpy(&vol_->cacheBuffer_.dir[1], &entry, sizeof(entry));
+  }
+  return vol_->cacheFlush();
+
+ restore:
+  d = cacheDirEntry(SdVolume::CACHE_FOR_WRITE);
+  if (!d) goto fail;
+  // restore entry
+  d->name[0] = entry.name[0];
+  vol_->cacheFlush();
+
+ fail:
+  return false;
+
+}

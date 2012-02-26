@@ -1,3 +1,4 @@
+/* -*- Mode: C -*- */
 /*
  12-3-09
  Nathan Seidle
@@ -926,12 +927,35 @@ void command_shell(void)
         }
       }
 #ifdef INCLUDE_SIMPLE_EMBEDDED
-      else
-      {
-        command_succedded = 1;
-      }
+      command_succedded = 1;
 #endif
+    }
 
+    else if(strncmp_P(command_arg, PSTR("mv"), 2) == 0)
+    {
+      //Argument 2: Old name
+      command_arg = get_cmd_arg(1);
+      if(command_arg == 0)
+        continue;
+
+      SdFile oldFile;
+      if (!oldFile.open(&currentDirectory, command_arg, O_READ)) continue;
+
+      //Argument 3: New name
+      command_arg = get_cmd_arg(2);
+      if(command_arg == 0)
+        continue;
+
+      if (!oldFile.rename(&currentDirectory, command_arg)) {
+        if ((feedback_mode & EXTENDED_INFO) > 0)
+        {
+          PgmPrintln("error renaming file to ");
+          Serial.println(command_arg);
+        }
+      }
+#ifdef INCLUDE_SIMPLE_EMBEDDED
+      command_succedded = 1;
+#endif
     }
     //NOTE on using "rm <option>/<file> <subfolder>"
     // "rm -rf <subfolder>" removes the <subfolder> and all contents recursively
