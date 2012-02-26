@@ -260,6 +260,7 @@ class SdFile : public Print {
   uint8_t seekCur(uint32_t pos) {
     return seekSet(curPosition_ + pos);
   }
+  bool rename(SdFile* dirFile, const char* newName);
   /**
    *  Set the files current position to end of file.  Useful to position
    *  a file for append. See seekSet().

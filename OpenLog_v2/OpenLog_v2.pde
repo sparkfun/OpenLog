@@ -1,3 +1,4 @@
+/* -*- Mode: C -*- */
 /*
  12-3-09
  Nathan Seidle
@@ -679,32 +680,43 @@ uint8_t append_file(char* file_name)
 
     checkedSpot++;
 
-    if(checkedSpot == (RX_BUFF_SIZE/2)) { //We've finished checking the first half the buffer
-      file.write(rxBuffer, RX_BUFF_SIZE/2); //Record first half the buffer
-      file.sync(); //Push these new file.writes to the SD card
-    }
+    // Note that if escape_chars_received > 0 yet we are at the border of a buffer
+    // we can still end up with escape_chars_received in file if the sequence is
+    // finished across the buffer boundary.
+    if (escape_chars_received < setting_max_escape_character) {
+      if(checkedSpot == (RX_BUFF_SIZE/2)) { //We've finished checking the first half the buffer
+        file.write(rxBuffer, RX_BUFF_SIZE/2); //Record first half the buffer
+        file.sync(); //Push these new file.writes to the SD card
+      }
 
-    if(checkedSpot == RX_BUFF_SIZE){ //We've finished checking the second half the buffer
-      checkedSpot = 0;
-      file.write(rxBuffer + (RX_BUFF_SIZE/2), RX_BUFF_SIZE/2); //Record second half the buffer
-      file.sync(); //Push these new file.writes to the SD card
+      if(checkedSpot == RX_BUFF_SIZE){ //We've finished checking the second half the buffer
+        checkedSpot = 0;
+        file.write(rxBuffer + (RX_BUFF_SIZE/2), RX_BUFF_SIZE/2); //Record second half the buffer
+        file.sync(); //Push these new file.writes to the SD card
+      }
     }
 
     STAT1_PORT ^= (1<<STAT1); //Toggle the STAT1 LED each time we receive a character
   } //End while - escape character received or error
 
   //Upon receiving the escape character, we may still have stuff left in the buffer, record the last of the buffer to memory
-  if(checkedSpot == 0 || checkedSpot == (RX_BUFF_SIZE/2))
-  {
-    //Do nothing, we already recorded the buffers right before catching the escape character
+  int cs2 = checkedSpot;
+  // if needed back out the escape sequence to avoid it ending up in the file
+  if (escape_chars_received >= setting_max_escape_character) {
+    cs2 = checkedSpot - (setting_max_escape_character - 1);
   }
-  else if(checkedSpot < (RX_BUFF_SIZE/2))
+
+  if(checkedSpot <= (RX_BUFF_SIZE/2) && cs2 > 0)
   {
-    file.write(rxBuffer, checkedSpot); //Record first half the buffer
+    file.write(rxBuffer, cs2); //Record first half the buffer, minus the
   }
-  else //checkedSpot > (RX_BUFF_SIZE/2)
+  else if (cs2 > (RX_BUFF_SIZE/2)) // implied: checkedSpot > (RX_BUFF_SIZE/2)
   {
-    file.write(rxBuffer + (RX_BUFF_SIZE/2), checkedSpot - (RX_BUFF_SIZE/2)); //Record second half the buffer
+    file.write(rxBuffer + (RX_BUFF_SIZE/2), cs2 - (RX_BUFF_SIZE/2)); //Record second half the buffer
+  }
+  else
+  {
+    // There were only escape characters. Nothing to write.
   }
 
   file.sync();
@@ -915,12 +927,35 @@ void command_shell(void)
         }
       }
 #ifdef INCLUDE_SIMPLE_EMBEDDED
-      else
-      {
-        command_succedded = 1;
-      }
+      command_succedded = 1;
 #endif
+    }
 
+    else if(strncmp_P(command_arg, PSTR("mv"), 2) == 0)
+    {
+      //Argument 2: Old name
+      command_arg = get_cmd_arg(1);
+      if(command_arg == 0)
+        continue;
+
+      SdFile oldFile;
+      if (!oldFile.open(&currentDirectory, command_arg, O_READ)) continue;
+
+      //Argument 3: New name
+      command_arg = get_cmd_arg(2);
+      if(command_arg == 0)
+        continue;
+
+      if (!oldFile.rename(&currentDirectory, command_arg)) {
+        if ((feedback_mode & EXTENDED_INFO) > 0)
+        {
+          PgmPrintln("error renaming file to ");
+          Serial.println(command_arg);
+        }
+      }
+#ifdef INCLUDE_SIMPLE_EMBEDDED
+      command_succedded = 1;
+#endif
     }
     //NOTE on using "rm <option>/<file> <subfolder>"
     // "rm -rf <subfolder>" removes the <subfolder> and all contents recursively
@@ -1042,7 +1077,7 @@ void command_shell(void)
       uint8_t c;
       int16_t v;
       int16_t readSpot = 0;
-      while ((v = file.read()) > 0) {
+      while ((v = file.read()) >= 0) {
         //file.read() returns a 16 bit character. We want to be able to print extended ASCII
         //So we need 8 bit unsigned.
         c = v; //Force the 16bit signed variable into an 8bit unsigned
