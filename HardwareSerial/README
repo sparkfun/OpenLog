@@ -1,9 +1,0 @@
-For OpenLog to work under Arduino, we have to remove the normal serial interrupt that Serial.available() uses and replace it with our own RX interrupt vector in the main sketch.
-
-To compile OpenLog you will need to install a fresh copy of Arduino somewhere. I recommend c:\Arduino-OpenLog\ so that you don't confuse the installs.
-
-Replace the file located here:
-C:\arduino-OpenLog\hardware\arduino\cores\arduino\HardwareSerial.cpp
-with the HardwareSerial.cpp that you got when you did the github pull.
-
-Remember, compiling Sketches using this special version of Arduino will drive you mad because the serial interrupts will not work.

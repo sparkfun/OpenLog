@@ -1,32 +1,39 @@
  12-3-09
- Copyright SparkFun Electronics© 2010
+ SparkFun Electronics 2012
  Nathan Seidle
- spark at sparkfun.com
+ 
+ OpenLog hardware and firmware are released under the Creative Commons Share Alike v3.0 license.
+ http://creativecommons.org/licenses/by-sa/3.0/
+ Feel free to use, distribute, and sell varients of OpenLog. All we ask is that you include attribution of 'Based on OpenLog by SparkFun'.
+ 
+ OpenLog is based on the work of Bill Greiman and sdfatlib: http://code.google.com/p/sdfatlib/
  
  OpenLog is a simple serial logger based on the ATmega328 running at 16MHz. The ATmega328
- should be able to talk to high capacity (larger than 2GB) SD cards. The whole purpose of this
- logger was to create a logger that just powered up and worked. OpenLog ships with standard 
- 57600bps serial bootloader running at 16MHz so you can load new firmware with a simple serial
- connection. This makes it compatible with Arduino if needed.
+ is able to talk to high capacity (larger than 2GB) SD cards. The whole purpose of this
+ logger was to create a logger that just powered up and worked. OpenLog ships with an Arduino/Optiboot 
+ 115200bps serial bootloader running at 16MHz so you can load new firmware with a simple serial
+ connection.
+ 
+ OpenLog automatically works with 512MB, 1GB, 2GB, 4GB, 8GB, and 16GB microSD cards. We recommend FAT16 for 2GB and smaller cards. We
+ recommend FAT32 for 4GB and larger cards.
  	
- OpenLog runs at 9600bps by default. This is configurable to 2400, 9600, 57600, and 115200bps. We recommend 
- you attach a serial connection to reconfigure the unit to work at a different serial speed, but you 
- should be able to do it in software.
+ OpenLog runs at 9600bps by default. This is configurable to 2400, 4800, 9600, 19200, 38400, 57600, and 115200bps. You can alter 
+ all settings including baud rate and escape characters by editing config.txt found on OpenLog.
  
  Type '?' to get a list of supported commands.
  	
  During power up, you will see '12<'. '1' indicates the serial connection is established. '2' indicates
  the SD card has been successfully initialized. '<' indicates OpenLog is ready to receive serial characters.
  
- Recording constant 115200bps datastreams are supported. Throw it everything you've got!
+ Recording constant 115200bps datastreams are supported. Throw it everything you've got! To acheive this maximum record rate, please use the
+ SD card formatter from : http://www.sdcard.org/consumers/formatter/. The fewer files on the card, the faster OpenLog is able to begin logging.
+ 200 files is ok. 2GB worth of music and pictures is not.
  	
- 'cd ..' is a bit weird. Normally it's 'cd..' but to change to a lower dir, use 'cd ..'
+ To a lower dir, use 'cd ..' instead of 'cd..'.
  	
- Currently, the firmware supports creating a new file or directory up to 16 characters including the
- '.' and extension. "123456789012.txt" is the longest name. Any longer and the module will re-initialize
- as if there was a variable sizeof error.
+ Only standard 8.3 file names are supported. "12345678.123" is acceptable. "123456789.123" is not.
  
- Capital letters, white space, and other characters are supported ("Hi there#$_.txt").
+ All file names are pushed to upper case. "NewLog.txt" will become "NEWLOG.TXT".
  
  Type 'set' to enter baud rate configuration menu. Select the baud rate and press enter. You will then 
  see a message 'Going to 9600bps...' or some such message. You will need to power down OpenLog, change 
@@ -36,11 +43,8 @@
  to ground and power up OpenLog. You should see the LEDs blink back and forth for 2 seconds, then blink 
  in unison. Now power down OpenLog and remove the RX/GND jumper. OpenLog is now reset to 9600bps.
  	
- Please note: The preloaded STK500 serial bootloader is 2k, and begins at 0x7800 (30,720). If the code is
- larger than 30,719 bytes, you will get verification errors during serial bootloading.
- 
- SD vs HCSD configuration is found in sd_raw_config.h - Currently only 512MB, 1GB, 2GB, and some 
- 4GB cards work (not yet compatible with HCSD cards).
+ Please note: The preloaded Optiboot serial bootloader is 0.5k, and begins at 0x7E00 (32,256). If the code is
+ larger than 32,256 bytes, you will get verification errors during serial bootloading.
  
  STAT1 LED is sitting on PD5 (Arduino D5) - toggles when character is received
  STAT2 LED is sitting on PB5 (Arduino D13) - toggles when SPI writes happen
@@ -49,18 +53,18 @@
  No SD card - 3 blinks
  Baud rate change (requires power cycle) - 4 blinks
  
- During an append, OpenLog will buffer 512 characters at a time. That means that if the system loses power
- while reading in characters, you may loose up to, but no more than, 511 characters. This is important for low
- power systems where you may not know when the battery or power will die. OpenLog should record each buffer as 
- it receives each 512 byte chunk. The only way to exit an append is with Ctrl+z (ASCII 26).
+ OpenLog regularly shuts down to conserve power. If after 0.5 seconds no characters are received, OpenLog will record any unsaved characters
+ and go to sleep. OpenLog will automatically wake up and continue logging the instant a new character is received.
  
- 8mA idle
- 18mA actively writing
+ 1.55mA idle
+ 15mA actively writing
  
  Input voltage on VCC can be 3.3 to 12V. Input voltage on RX-I pin must not exceed 6V. Output voltage on
  TX-O pin will not be greater than 3.3V. This may cause problems with some systems - for example if your
  attached microcontroller requires 4V minimum for serial communication (this is rare).
  
+ OpenLog has progressed significantly over the past three years. Please see Changes.txt or GitHub for a full change log.
+
  
  v1.1
  Adding better defines for EEPROM settings
@@ -350,3 +354,128 @@
  verbose <"on"|"off">: sets whether command errors are verbose (long winded) or just the "!" character. Example: "verbose off" sets verbose off. Then if a 
  command like "blah" is received, then only "!>" is seen from the command line interface. This makes it easier for embedded systems to recognize there 
  was an error. This setting is not recorded to EEPROM.
+ 
+ 
+ v2.3 Migrated to v10.10.10 of sdfatlib. Moved to inline RX interrupt and buffer. Improved the ability to receive a constant stream at 57600bps.
+ 
+ 27334 bytes out of 30720.
+ 
+ Remember - we had to completely butcher HardwareSerial.cpp so a normal Arduino installation will not work. 
+ C:\arduino-xxxx\hardware\arduino\cores\arduino\HardwareSerial.cpp
+ 
+ I removed the receive interupt handler from HardwareSerial.cpp so that we can deal directly with USART_RX_vect in the main code. This allows
+ us to return to the way OpenLog used to operate - by having one buffer split in half. Once one half fills, it is recorded to SD while the other
+ half fills up. This dramatically decreases the time spent in function calls and SD recording, which leads to many fewer characters dropped.
+ 
+ The change log at the top of the main code got so large I've moved it to a version controlled "Changes.txt" file.
+ 
+ By making all these changes, I have broken many things. Ringp - I could use your help here. I apologize for stomping on so much of your work. I was not
+ good enough to figure out how to re-link from the old function calls to the new sdfatlib setup.
+ 
+ Backspace is broken - ringp, I saw this fix in one of your commits, but looking at the code, I don't see how it is supposed to work. Either way, we still
+ get 0x08 when trying to backspace.
+ 
+ New sdfatlib doesn't have SdFat.cpp so fileInfo doesn't work. These function calls are marked with //Error
+ 
+ I have chosen to dis-allow deprecated functions:
+ #define ALLOW_DEPRECATED_FUNCTIONS 0
+ This forced some trivial changes to the SD write and new file creation function calls. I believe we've successfully migrated to the new version of sdfatlib.
+ 
+ In the command_shell / read_line function : It may be better to pull directly from the UART buffer and use the RX interrupt. For now, we brute force it.
+ 
+ Because of all these changes, I need to re-test power consumption. For now, I'm confident it's low enough.
+ 
+ Testing with 512 buffer array size
+ 1GB @ 57600 - dropped very little out of 3 tests
+ 1GB @ 115200 - dropped very little out of 2 tests
+ 8GB @ 57600 - Formatted using the sd formater (32k byte allocation size). Dropped nothing.
+ 8GB @ 115200 - dropped very little, dropped none
+ 16GB w/ Lots of files @ 57600 - Drops the first part of the file because of start up delay?
+ 16GB w/ Lots of files @ 115200
+ 
+ 1024 array size (and 800) does not run
+ 
+ Testing with 700 buffer array size
+ 1GB @ 57600 - 110300 out of 111000 bytes, 110300/111000,
+ 1GB @ 115200 - 111000/111000!, 109600/111000
+ 8GB @ 57600 - 109000/111000, 111000/111000!,
+ 8GB @ 115200 - 111000/111000!, 111000/111000!,
+ 16GB w/ Lots of files @ 57600 - 85120/111000, 85120/111000
+ 16GB w/ Lots of files @ 115200 - 56420 (but once it got going, log looks good). 56420.
+ 
+ I am seeing long delays on cards with lots of files. In the above tests, the 16GB test card is a good example. It has 2GB worth of random files in a sub directory.
+ After OpenLog boots, goes to '12<'. After I send ~500 characters OpenLog freezes for a couple seconds, then returns to normal, very fast, operation. During
+ that down time, I believe sdfatlib is searching for an open cluster. The odd thing is that after the cluster is established (after the initial down time) OpenLog
+ performs excellently. I am hoping to create a faux file or pre-write and save to the file or some how get this allocation done before we report the 
+ '12<' indicating we are ready. That way, if a card does fill up, as long as the host system is checking for '<', it doesn't matter how long it takes 
+ sdfatlib to find the next free cluster.
+ 
+ You can see that we drop 700 bytes at a time. That's a bit odd - I'd expect to drop half or 350 at a time. 
+ What happens if we shrink the array size to say 256? To be expected, this is bad - way more instances of dropped characters.
+ 
+ Added blink for each test to the OpenLog_Test sketch so we can see as the test progresses.
+ 
+ http://www.sdcard.org/consumers/formatter/ is the site for SD card formatting. It looks like this program takes a guess at the correct block size. This could
+ help a lot in the future.
+ 
+ 
+ v2.4 Merged ringp updates. Commands cd, rm, ls work again! New "rm -rf" command to remove directory and its files.
+ 
+ 29028 bytes of 30720 (yikes).
+ 
+ Thanks ringp! Great work.
+ 
+ Remember - we had to completely butcher HardwareSerial.cpp so a normal Arduino installation will not work. 
+ C:\arduino-xxxx\hardware\arduino\cores\arduino\HardwareSerial.cpp
+ I've added the modified HardwareSerial.cpp to the 
+ 
+ Testing at 57600
+ 1GB: 110490/111000, 110490/111000
+ 8GB: 111000/111000, 111000/111000, 111000/111000
+ 16GB: 83890/111000, 84908/111000
+ The 16GB card with tons of files continue to have problems but the other cards (FAT and FAT32) are acceptable. Whenever possible, use a clean, 
+ empty, freshly formatted card.
+ 
+ "rm -rf mydirectory" to remove a directory and all its files
+ 
+ Windows 7 stores the Arduino hex file is an aweful place. Something like:
+ C:\Users\Main\AppData\Local\Temp\build3390340147786739225.tmp\OpenLog_v2.cpp.hex
+ 
+ Added HardwareSerial.cpp and a readme to the main trunk.
+ Added OpenLog_v2.cpp.hex to the main trunk.
+ 
+ 
+ v2.41 Power loss bug fixed. Adding support for 38400bps for testing with SparkFum 9DOF IMU logging. 
+ 
+ 29124 bytes of 30720 (yikes)
+ 
+ Found a bug in the append_file routine. If the unit is actively logging, file.writes are flying by quickly. But if OpenLog loses power, none of
+ the data is recorded because there is no file.sync. Data would only get recorded if the unit went idle or if user entered escape command. This
+ has since been fixed with two file.sync() commands.
+ 
+
+ v2.5 Improved 'read' command. Added 'reset' command.
+ 
+ 28782 bytes of 30720 (yikes)
+ 
+ Modified the read command so that we can print extended ASCII characters. The function was also failing to print any value over 127
+ (limited to signed 8 bits - boo). Thank you wilafau! You proposed excellent, easy fixes.
+ 
+ Added raw command during print operation. This allows for non-visible and extended ASCII characters to be printed correctly, if need be.
+ 
+ Issuing 'reset' command causes OpenLog to reset and re-read the config file. This is important if you want to change the config file then restart.
+ 
+ Removed some of the extraneous prints from the help menu to save on space.
+
+
+ v2.51 Improved command prompt parsing (now ignores '\n')
+ 
+ We now ignore the \n character when parsing characters from the command prompt. This makes it easier to create code on a microcontroller that
+ correctly controls OpenLog. Previously, println or sprintf commands were adding a \n to the end of the string that would confuse OpenLog. One
+ way around this if you have previous versions is this
+ sprintf(buff, "new blah.txt\r");
+ Serial.print(buff); //No println, use \r in string instead
+ 
+ Also - added a CommandTest sketch to demonstrate how you can control OpenLog from a microcontroller / automate the command prompt
+
+ 
