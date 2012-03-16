@@ -2,7 +2,6 @@
  12-3-09
  Nathan Seidle
  SparkFun Electronics 2012
- spark at sparkfun.com
  
  OpenLog hardware and firmware are released under the Creative Commons Share Alike v3.0 license.
  http://creativecommons.org/licenses/by-sa/3.0/
@@ -106,19 +105,27 @@
  16GB: 111075/111075, 111075/111075
  The card with tons of files may have problems. Whenever possible, use a clean, empty, freshly formatted card.
  
+ 
+ v3.1
+ 
+ Added fix from issue 76: https://github.com/nseidle/OpenLog/issues/76
+ Added support for verbose and echo settings recorded to the config file and EEPROM.
+ 
+ 
  */
 
 #include <SdFat.h> //We do not use the built-in SD.h file because it calls Serial.print
 #include <SerialPort.h> //This is a new/beta library written by Bill Greiman. You rock Bill!
 #include <EEPROM.h>
 
-SerialPort<0, 600, 0> NewSerial;
+SerialPort<0, 500, 0> NewSerial;
 //This is a very important buffer declaration. This sets the <port #, rx size, tx size>. We set
 //the TX buffer to zero because we will be spending most of our time needing to buffer the incoming (RX) characters.
 //900 works on minimal implementation, doesn't work with the full command prompt
 //800 doesn't work with full command prompt
 //700 works very well at 115200
 //600 works well at 115200
+//500
 
 #include <avr/sleep.h> //Needed for sleep_mode
 #include <avr/power.h> //Needed for powering down perihperals such as the ADC/TWI and Timers
@@ -144,8 +151,8 @@ void(* Reset_AVR) (void) = 0; //Dirty way of resetting the ATmega, but it works 
 #define FOLDER_TRACK_DEPTH 2 //Decreased for more RAM access
 char folderTree[FOLDER_TRACK_DEPTH][12];
 
-#define CFG_FILENAME "config.txt"
-//This is the name of the file that contains the unit settings
+#define CFG_FILENAME "config.txt" //This is the name of the file that contains the unit settings
+#define CFG_LENGTH  20 //Length of text found in config file: "115200,103,14,0,1,1\0" = 115200 bps, escape char of ASCII(103), 14 times, new log mode, verbose on, echo on. 
 
 //Internal EEPROM locations for the user settings
 #define LOCATION_BAUD_SETTING		0x01
@@ -154,6 +161,8 @@ char folderTree[FOLDER_TRACK_DEPTH][12];
 #define LOCATION_FILE_NUMBER_MSB	0x04
 #define LOCATION_ESCAPE_CHAR		0x05
 #define LOCATION_MAX_ESCAPE_CHAR	0x06
+#define LOCATION_VERBOSE                0x07
+#define LOCATION_ECHO                   0x08
 
 #define BAUD_2400	0
 #define BAUD_9600	1
@@ -185,8 +194,11 @@ const uint8_t statled2 = 13; //This is the SPI LED, indicating SD traffic
 #define INCLUDE_SIMPLE_EMBEDDED
 #endif
 
+//These are bit locations used when testing for simple embedded commands.
 #define ECHO			0x01
 #define EXTENDED_INFO		0x02
+#define OFF  0x00
+#define ON   0x01
 
 #ifdef INCLUDE_SIMPLE_EMBEDDED
 #define EMBEDDED_END_MARKER	0x08
@@ -201,6 +213,8 @@ uint8_t setting_uart_speed; //This is the baud rate that the system runs at, def
 uint8_t setting_system_mode; //This is the mode the system runs in, default is MODE_NEWLOG
 uint8_t setting_escape_character; //This is the ASCII character we look for to break logging, default is ctrl+z
 uint8_t setting_max_escape_character; //Number of escape chars before break logging, default is 3
+uint8_t setting_verbose; //This controls the whether we get extended or simple responses.
+uint8_t setting_echo; //This turns on/off echoing at the command prompt
 
 //The number of command line arguments
 //Increase to support more arguments but be aware of the memory restrictions
@@ -582,6 +596,12 @@ void set_default_settings(void)
   //Reset number of escape characters to 3
   EEPROM.write(LOCATION_MAX_ESCAPE_CHAR, 3);
 
+  //Reset verbose responses to on
+  EEPROM.write(LOCATION_VERBOSE, ON);
+
+  //Reset echo to on
+  EEPROM.write(LOCATION_ECHO, ON);
+
   //These settings are not recorded to the config file
   //We can't do it here because we are not sure the FAT system is init'd
 }
@@ -625,6 +645,35 @@ void read_system_settings(void)
     setting_max_escape_character = 3; //Reset number of escape characters to 3
     EEPROM.write(LOCATION_MAX_ESCAPE_CHAR, setting_max_escape_character);
   }
+
+  //Read whether we should use verbose responses or not
+  //Default is true
+  setting_verbose = EEPROM.read(LOCATION_VERBOSE);
+  if(setting_verbose != ON || setting_verbose != OFF) 
+  {
+    setting_verbose = ON; //Reset verbose to true
+    EEPROM.write(LOCATION_VERBOSE, setting_verbose);
+  }
+
+  //Read whether we should echo characters or not
+  //Default is true
+  setting_echo = EEPROM.read(LOCATION_ECHO);
+  if(setting_echo != ON || setting_echo != OFF) 
+  {
+    setting_echo = ON; //Reset to echo on
+    EEPROM.write(LOCATION_ECHO, setting_echo);
+  }
+  
+  //Set flags for extended mode options  
+  if (setting_verbose == ON)
+    feedback_mode |= EXTENDED_INFO;
+  else
+    feedback_mode &= ((uint8_t)~EXTENDED_INFO);
+
+  if (setting_echo == ON)
+    feedback_mode |= ECHO;
+  else
+    feedback_mode &= ((uint8_t)~ECHO);
 }
 
 void read_config_file(void)
@@ -657,9 +706,10 @@ void read_config_file(void)
   //Read up to 20 characters from the file. There may be a better way of doing this...
   char c;
   int len;
-  uint8_t settings_string[20]; //"115200,103,14,0\0" = 115200 bps, escape char of ASCII(103), 14 times, new log mode. 20 characters is longer than the max (16).
-  for(len = 0 ; len < 20 ; len++) {
+  uint8_t settings_string[CFG_LENGTH]; //"115200,103,14,0,1,1\0" = 115200 bps, escape char of ASCII(103), 14 times, new log mode, verbose on, echo on.
+  for(len = 0 ; len < CFG_LENGTH ; len++) {
     if( (c = file.read()) < 0) break; //We've reached the end of the file
+    if(c == '\0') break; //Bail if we hit the end of this string
     settings_string[len] = c;
   }
   file.close();
@@ -680,10 +730,14 @@ void read_config_file(void)
   char new_system_mode = MODE_NEWLOG;
   char new_system_escape = 26;
   char new_system_max_escape = 3;
+  char new_system_verbose = ON;
+  char new_system_echo = ON;
 
   //Parse the settings out
   uint8_t i = 0, j = 0, setting_number = 0;
   char new_setting[7]; //Max length of a setting is 6, the bps setting = '115200' plus '\0'
+  uint8_t new_setting_int = 0;
+  
   for(i = 0 ; i < len; i++)
   {
     //Pick out one setting from the line of text
@@ -695,7 +749,8 @@ void read_config_file(void)
     }
 
     new_setting[j] = '\0'; //Terminate the string for array compare
-
+    new_setting_int = atoi(new_setting); //Convert string to int
+    
     if(setting_number == 0) //Baud rate
     {
       if( strcmp(new_setting, "2400") == 0) new_system_baud = BAUD_2400;
@@ -709,18 +764,28 @@ void read_config_file(void)
     }
     else if(setting_number == 1) //Escape character
     {
-      new_system_escape = atoi(new_setting);
+      new_system_escape = new_setting_int;
       if(new_system_escape == 0 || new_system_escape > 127) new_system_escape = 26; //Default is ctrl+z
     }
     else if(setting_number == 2) //Max amount escape character
     {
-      new_system_max_escape = atoi(new_setting);
+      new_system_max_escape = new_setting_int;
       if(new_system_max_escape == 0 || new_system_max_escape > 10) new_system_max_escape = 3; //Default is 3
     }
     else if(setting_number == 3) //System mode
     {
-      new_system_mode = atoi(new_setting);
+      new_system_mode = new_setting_int;
       if(new_system_mode == 0 || new_system_mode > 5) new_system_mode = MODE_NEWLOG; //Default is NEWLOG
+    }
+    else if(setting_number == 4) //Verbose setting
+    {
+      new_system_verbose = new_setting_int;
+      if(new_system_verbose != ON && new_system_verbose != OFF) new_system_verbose = ON; //Default is on
+    }
+    else if(setting_number == 5) //Echo setting
+    {
+      new_system_echo = new_setting_int;
+      if(new_system_echo != ON && new_system_echo != OFF) new_system_echo = ON; //Default is on
     }
     else
       //We're done! Stop looking for settings
@@ -733,8 +798,8 @@ void read_config_file(void)
   //This will print the found settings. Use for debugging
   NewSerial.print(F("Settings determined to be: "));
 
-  char temp_string[16]; //"115200,103,14,0\0" = 115200 bps, escape char of ASCII(103), 14 times, new log mode
-  char temp[3];
+  char temp_string[CFG_LENGTH]; //"115200,103,14,0,1,1\0" = 115200 bps, escape char of ASCII(103), 14 times, new log mode, verbose on, echo on.
+  char temp[CFG_LENGTH];
 
   if(new_system_baud == BAUD_2400) strcpy(temp_string, "2400");
   if(new_system_baud == BAUD_4800) strcpy(temp_string, "4800");
@@ -744,25 +809,8 @@ void read_config_file(void)
   if(new_system_baud == BAUD_57600) strcpy(temp_string, "57600");
   if(new_system_baud == BAUD_115200) strcpy(temp_string, "115200");
 
-  strcat(temp_string, ",");
-
-  //Convert escape character to an ASCII visible string
-  sprintf(temp, "%d", new_system_escape);
+  sprintf(temp, ",%d,%d,%d,%d,%d\0", new_system_escape, new_system_max_escape, new_system_mode, new_system_verbose, new_system_echo);
   strcat(temp_string, temp); //Add this string to the system string
-
-  strcat(temp_string, ",");
-
-  //Convert max escape character to an ASCII visible string
-  sprintf(temp, "%d", new_system_max_escape);
-  strcat(temp_string, temp); //Add this string to the system string
-
-  strcat(temp_string, ",");
-
-  //Convert system mode to a ASCII visible character
-  sprintf(temp, "%d", new_system_mode);
-  strcat(temp_string, temp); //Add this string to the system string
-
-  strcat(temp_string, "\0");
 
   NewSerial.println(temp_string);
 #endif
@@ -813,6 +861,22 @@ void read_config_file(void)
     recordNewSettings = true;
   }
 
+  if(new_system_verbose != setting_verbose) {
+    //Goto new verbose setting
+    setting_verbose = new_system_verbose;
+    EEPROM.write(LOCATION_VERBOSE, setting_verbose);
+
+    recordNewSettings = true;
+  }
+
+  if(new_system_echo != setting_echo) {
+    //Goto new echo setting
+    setting_echo = new_system_echo;
+    EEPROM.write(LOCATION_ECHO, setting_echo);
+
+    recordNewSettings = true;
+  }
+
   //We don't want to constantly record a new config file on each power on. Only record when there is a change.
   if(recordNewSettings == true)
     record_config_file(); //If we corrected some values because the config file was corrupt, then overwrite any corruption
@@ -822,6 +886,17 @@ void read_config_file(void)
 #endif
 
   //All done! New settings are loaded. System will now operate off new config settings found in file.
+
+  //Set flags for extended mode options  
+  if (setting_verbose == ON)
+    feedback_mode |= EXTENDED_INFO;
+  else
+    feedback_mode &= ((uint8_t)~EXTENDED_INFO);
+
+  if (setting_echo == ON)
+    feedback_mode |= ECHO;
+  else
+    feedback_mode &= ((uint8_t)~ECHO);
 
 }
 
@@ -835,7 +910,7 @@ void record_config_file(void)
   SdFile rootDirectory;
   if (!rootDirectory.openRoot(&volume)) error("openRoot"); // open the root directory
 
-  char configFileName[13];
+  char configFileName[strlen(CFG_FILENAME)];
   sprintf(configFileName, CFG_FILENAME); //This is the name of the config file. 'config.sys' is probably a bad idea.
 
   //If there is currently a config file, trash it
@@ -862,15 +937,16 @@ void record_config_file(void)
   }
   //Config was successfully created, now record current system settings to the config file
 
-  //Baud, escape character, escape times, system mode (0 = new log)
-  char settings_string[16]; //"115200,103,14,0\0" = 115200 bps, escape char of ASCII(103), 14 times, new log mode
-  char temp[3];
+  char settings_string[CFG_LENGTH]; //"115200,103,14,0,1,1\0" = 115200 bps, escape char of ASCII(103), 14 times, new log mode, verbose on, echo on.
+  char temp[CFG_LENGTH]; //This contains bits of the overall config string.
 
   //Before we read the EEPROM values, they've already been tested and defaulted in the read_system_settings function
   char current_system_baud = EEPROM.read(LOCATION_BAUD_SETTING);
-  char current_system_mode = EEPROM.read(LOCATION_SYSTEM_SETTING);
   char current_system_escape = EEPROM.read(LOCATION_ESCAPE_CHAR);
   char current_system_max_escape = EEPROM.read(LOCATION_MAX_ESCAPE_CHAR);
+  char current_system_mode = EEPROM.read(LOCATION_SYSTEM_SETTING);
+  char current_system_verbose = EEPROM.read(LOCATION_VERBOSE);
+  char current_system_echo = EEPROM.read(LOCATION_ECHO);
 
   //Determine current baud and copy it to string
   if(current_system_baud == BAUD_2400) strcpy(settings_string, "2400");
@@ -881,38 +957,21 @@ void record_config_file(void)
   if(current_system_baud == BAUD_57600) strcpy(settings_string, "57600");
   if(current_system_baud == BAUD_115200) strcpy(settings_string, "115200");
 
-  strcat(settings_string, ",");
-
-  //Convert escape character to an ASCII visible string
-  sprintf(temp, "%d", current_system_escape);
+  //Convert system settings to visible ASCII characters
+  sprintf(temp, ",%d,%d,%d,%d,%d\0", current_system_escape, current_system_max_escape, current_system_mode, current_system_verbose, current_system_echo);
   strcat(settings_string, temp); //Add this string to the system string
-
-  strcat(settings_string, ",");
-
-  //Convert max escape character to an ASCII visible string
-  sprintf(temp, "%d", current_system_max_escape);
-  strcat(settings_string, temp); //Add this string to the system string
-
-  strcat(settings_string, ",");
-
-  //Convert system mode to a ASCII visible character
-  sprintf(temp, "%d", current_system_mode);
-  strcat(settings_string, temp); //Add this string to the system string
-
-  strcat(settings_string, "\0");
-
-  //Record current system settings to the config file
-  //strcpy( (char*)input_buffer, "9600,26,3,0\0");
-  char generalBuffer[16]; //Max would be 15: 115200,26,10,1\0
-  strcpy( (char*)generalBuffer, settings_string);
 
 #if DEBUG
   NewSerial.print(F("\nSetting string: "));
   NewSerial.println(settings_string);
 #endif
 
-  if(file.write((uint8_t*)generalBuffer, strlen(settings_string)) != strlen(settings_string))
+  //Record current system settings to the config file
+  if(file.write((uint8_t*)settings_string, strlen(settings_string)) != strlen(settings_string))
     NewSerial.println(F("error writing to file"));
+
+  //Add a decoder line to the file
+  file.write("\n\rbaud,escape,esc#,mode,verb,echo\0"); //Add this string to the file
 
   file.sync(); //Sync all newly written data to card
   file.close(); //Close this file
@@ -1187,7 +1246,7 @@ void command_shell(void)
       uint8_t c;
       int16_t v;
       int16_t readSpot = 0;
-      while ((v = file.read()) > 0) {
+      while ((v = file.read()) >= 0) {
         //file.read() returns a 16 bit character. We want to be able to print extended ASCII
         //So we need 8 bit unsigned.
         c = v; //Force the 16bit signed variable into an 8bit unsigned
@@ -1451,10 +1510,17 @@ void command_shell(void)
       command_arg = get_cmd_arg(1);
       if (command_arg != 0)
       {
-        if ((tmp_var = strncmp(command_arg, "on", 2)) == 0)
+        if ((tmp_var = strncmp(command_arg, "on", 2)) == 0) {
+          setting_echo = ON;
           feedback_mode |= ECHO;
-        else if ((tmp_var = strncmp(command_arg, "off", 3)) == 0)
-          feedback_mode &= ((uint8_t)~ECHO);
+        }
+        else if ((tmp_var = strncmp(command_arg, "off", 3)) == 0) {
+          setting_echo = OFF;
+          feedback_mode &= ((uint8_t)~ECHO); 
+        }
+
+        EEPROM.write(LOCATION_ECHO, setting_echo); //Commit this setting to EEPROM
+        record_config_file(); //Put this new setting into the config file
 
 #ifdef INCLUDE_SIMPLE_EMBEDDED
         command_succedded = (tmp_var == 0);
@@ -1469,10 +1535,18 @@ void command_shell(void)
       command_arg = get_cmd_arg(1);
       if (command_arg != 0)
       {
-        if ((tmp_var = strncmp(command_arg, "on", 2)) == 0)
+        if ((tmp_var = strncmp(command_arg, "on", 2)) == 0) {
+          setting_verbose = ON;
           feedback_mode |= EXTENDED_INFO;
-        else if ((tmp_var = strncmp(command_arg, "off", 3)) == 0)
+        }
+        else if ((tmp_var = strncmp(command_arg, "off", 3)) == 0) {
+          setting_verbose = OFF;
           feedback_mode &= ((uint8_t)~EXTENDED_INFO);
+        }
+          
+        EEPROM.write(LOCATION_VERBOSE, setting_verbose); //Commit this setting to EEPROM
+        record_config_file(); //Put this new setting into the config file
+          
 #ifdef INCLUDE_SIMPLE_EMBEDDED
         command_succedded = (tmp_var == 0);
 #endif
@@ -1686,7 +1760,7 @@ uint8_t gotoDir(char *dir)
 
 void print_menu(void)
 {
-  NewSerial.println(F("OpenLog v3.0"));
+  NewSerial.println(F("OpenLog v3.1"));
   NewSerial.println(F("Basic commands:"));
   NewSerial.println(F("new <file>\t\t: Creates <file>"));
   NewSerial.println(F("append <file>\t\t: Appends text to end of <file>. The text is read from the UART in a stream and is not echoed. Finish by sending Ctrl+z (ASCII 26)"));
