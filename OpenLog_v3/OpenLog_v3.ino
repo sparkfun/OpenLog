@@ -115,6 +115,8 @@
  Because of the new code to the cycle sensitive append_log loop, 115200bps is not as rock solid as I'd like.
  I plan to correct this in the Light version.
  
+ Added a maxLoop variable calculation to figure out how many bytes to receive before we do a forced file.sync.
+ 
  */
 
 #include <SdFat.h> //We do not use the built-in SD.h file because it calls Serial.print
@@ -439,19 +441,38 @@ uint8_t append_file(char* file_name)
   NewSerial.print('<'); //give a different prompt to indicate no echoing
   digitalWrite(statled1, HIGH); //Turn on indicator LED
 
-  //#if RAM_TESTING
-  //  NewSerial.print("Free RAM receive ready: ");
-  //  NewSerial.println(memoryTest());
-  //#endif
+#if RAM_TESTING
+  NewSerial.print("Free RAM receive ready: ");
+  NewSerial.println(memoryTest());
+#endif
 
-  uint8_t localBuffer[32];
+#define LOCAL_BUFF_SIZE  32
+  uint8_t localBuffer[LOCAL_BUFF_SIZE];
   uint8_t checkedSpot;
 
   uint16_t idleTime = 0;
   const uint16_t MAX_IDLE_TIME_MSEC = 500; //The number of milliseconds before unit goes to sleep
-  uint16_t timeSinceLastRecord = 0; //Sync the file every 14,400 bytes
 
   uint8_t escape_chars_received = 0;
+
+  //Ugly calculation to figure out how many times to loop before we need to force a record (file.sync())
+  uint32_t maxLoops;
+  uint16_t timeSinceLastRecord = 0; //Sync the file every maxLoop # of bytes
+  if(setting_uart_speed == BAUD_2400) maxLoops = 2400; //Set bits per second
+  if(setting_uart_speed == BAUD_4800) maxLoops = 4800;
+  if(setting_uart_speed == BAUD_9600) maxLoops = 9600;
+  if(setting_uart_speed == BAUD_19200) maxLoops = 19200;
+  if(setting_uart_speed == BAUD_38400) maxLoops = 38400;
+  if(setting_uart_speed == BAUD_57600) maxLoops = 57600;
+  if(setting_uart_speed == BAUD_115200) maxLoops = 115200;
+  maxLoops /= 8; //Convert to bytes per second
+  maxLoops /= LOCAL_BUFF_SIZE; //Convert to # of loops
+
+#if DEBUG
+  NewSerial.print("maxLoops: ");
+  NewSerial.println(maxLoops);
+#endif
+
 
   //Start recording incoming characters
   while(escape_chars_received < setting_max_escape_character) {
@@ -481,11 +502,9 @@ uint8_t append_file(char* file_name)
 
       idleTime = 0; //We have characters so reset the idleTime
 
-      if(timeSinceLastRecord++ > 450) { //14,400 bytes / 32 bytes per loop = 450 loops
+      if(timeSinceLastRecord++ > maxLoops) { //This will force a sync approximately every second
         timeSinceLastRecord = 0;
         file.sync(); //Sync the card
-        //This will force a file sync every 1s at 115200bps (14,400 bytes per second)
-        //or every 12 seconds at 9600bps
       }
 
     }
@@ -2215,6 +2234,7 @@ uint8_t wildcmp(const char* wild, const char* string)
 
 //End wildcard functions
 //=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+
 
 
 
