@@ -397,23 +397,37 @@ uint8_t append_file(char* file_name)
   NewSerial.print('<'); //give a different prompt to indicate no echoing
   digitalWrite(statled1, HIGH); //Turn on indicator LED
 
-  //#if RAM_TESTING
-  //  NewSerial.print("Free RAM receive ready: ");
-  //  NewSerial.println(memoryTest());
-  //#endif
+#if RAM_TESTING
+  NewSerial.print("Free RAM receive ready: ");
+  NewSerial.println(memoryTest());
+#endif
 
-  uint8_t localBuffer[32];
+#define LOCAL_BUFF_SIZE  32
+  uint8_t localBuffer[LOCAL_BUFF_SIZE];
 
   uint16_t idleTime = 0;
-  const uint16_t MAX_IDLE_TIME_MSEC = 500; //The number of milliseconds before unit goes to sleep
+  const uint16_t MAX_IDLE_TIME_MSEC = 100; //The number of milliseconds before unit goes to sleep
+
+  //Ugly calculation to figure out how many times to loop before we need to force a record (file.sync())
+  /*uint32_t maxLoops;
+  uint16_t timeSinceLastRecord = 0; //Sync the file every maxLoop # of bytes
+  if(setting_uart_speed == BAUD_2400) maxLoops = 2400; //Set bits per second
+  if(setting_uart_speed == BAUD_4800) maxLoops = 4800;
+  if(setting_uart_speed == BAUD_9600) maxLoops = 9600;
+  if(setting_uart_speed == BAUD_19200) maxLoops = 19200;
+  if(setting_uart_speed == BAUD_38400) maxLoops = 38400;
+  if(setting_uart_speed == BAUD_57600) maxLoops = 57600;
+  if(setting_uart_speed == BAUD_115200) maxLoops = 115200;
+  maxLoops /= 8; //Convert to bytes per second
+  maxLoops /= LOCAL_BUFF_SIZE; //Convert to # of loops
+  */
+
 
   //Start recording incoming characters
-  while(1) {
-MYJUMP:
+  while(1) { //Infinite loop
 
     uint8_t n = NewSerial.read(localBuffer, sizeof(localBuffer)); //Read characters from global buffer into the local buffer
     if (n > 0) {
-
       //Scan the local buffer for esacape characters
       //In the light version of OpenLog, we don't check for escape characters
 
@@ -423,11 +437,12 @@ MYJUMP:
 
       idleTime = 0; //We have characters so reset the idleTime
 
-      goto MYJUMP;
+      /*if(timeSinceLastRecord++ > maxLoops) { //This will force a sync approximately every second
+        timeSinceLastRecord = 0;
+        file.sync(); //Sync the card
+      }*/
     }
-
-    //If we haven't received any characters in 2s, goto sleep
-    if(idleTime++ > MAX_IDLE_TIME_MSEC) {
+    else if(idleTime > MAX_IDLE_TIME_MSEC) { //If we haven't received any characters in 2s, goto sleep
       file.sync(); //Sync the card before we go to sleep
 
       STAT1_PORT &= ~(1<<STAT1); //Turn off stat LED to save power
@@ -439,10 +454,12 @@ MYJUMP:
       power_spi_enable(); //After wake up, power up peripherals
       power_timer0_enable();
 
-      idleTime = millis(); //A received character woke us up to reset the idleTime
+      idleTime = 0; //A received character woke us up to reset the idleTime
     }
-
-    delay(1); //Burn 1ms waiting for new characters coming in
+    else {
+      idleTime++;
+      delay(1); //Burn 1ms waiting for new characters coming in
+    }
   }
 
   return(1); //Success!
