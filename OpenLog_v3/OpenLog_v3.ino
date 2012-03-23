@@ -106,11 +106,14 @@
  The card with tons of files may have problems. Whenever possible, use a clean, empty, freshly formatted card.
  
  
- v3.1
+ v3.1 Fixed bug where entire log data is lost when power is lost.
  
  Added fix from issue 76: https://github.com/nseidle/OpenLog/issues/76
  Added support for verbose and echo settings recorded to the config file and EEPROM.
+ Bugs 101 and 102 fixed with the help of pwjansen and wilafau - thank you!!
  
+ Because of the new code to the cycle sensitive append_log loop, 115200bps is not as rock solid as I'd like.
+ I plan to correct this in the Light version.
  
  */
 
@@ -446,40 +449,30 @@ uint8_t append_file(char* file_name)
 
   uint16_t idleTime = 0;
   const uint16_t MAX_IDLE_TIME_MSEC = 500; //The number of milliseconds before unit goes to sleep
+  uint16_t timeSinceLastRecord = 0; //Sync the file every 14,400 bytes
 
   uint8_t escape_chars_received = 0;
 
   //Start recording incoming characters
-  while(1) {
-MYJUMP:
+  while(escape_chars_received < setting_max_escape_character) {
 
     uint8_t n = NewSerial.read(localBuffer, sizeof(localBuffer)); //Read characters from global buffer into the local buffer
     if (n > 0) {
 
-      //Scan the local buffer for esacape characters
-      for(checkedSpot = 0 ; checkedSpot < n ; checkedSpot++) {
+      if (localBuffer[0] == setting_escape_character) {
+        escape_chars_received++;
 
-        if(localBuffer[checkedSpot] == setting_escape_character){
-
-          if(++escape_chars_received == setting_max_escape_character){
-            //We're done! Record the reminants of the buffer, excluding the escape character and leave
-            if(n >= setting_max_escape_character)
-              file.write(localBuffer, (n - setting_max_escape_character));
-            else
-              file.write(localBuffer, (n));
-
-            file.sync();
-            file.close(); //Done recording, close out the file
-
-              digitalWrite(statled1, LOW); //Turn off indicator LED
-
-            NewSerial.print("~"); //Indicate a successful record
-
-            return(1); //Success!
+        //Scan the local buffer for esacape characters
+        for(checkedSpot = 1 ; checkedSpot < n ; checkedSpot++) {
+          if(localBuffer[checkedSpot] == setting_escape_character) {
+            escape_chars_received++;
+            //If n is greater than 3 there's a chance here where we receive three esc chars
+            // and then reset the variable: 26 26 26 A T + would not escape correctly
+            if(escape_chars_received == setting_max_escape_character) break;
           }
+          else
+            escape_chars_received = 0; 
         }
-        else
-          escape_chars_received = 0;
       }
 
       file.write(localBuffer, n); //Record the buffer to the card
@@ -488,11 +481,15 @@ MYJUMP:
 
       idleTime = 0; //We have characters so reset the idleTime
 
-      goto MYJUMP;
-    }
+      if(timeSinceLastRecord++ > 450) { //14,400 bytes / 32 bytes per loop = 450 loops
+        timeSinceLastRecord = 0;
+        file.sync(); //Sync the card
+        //This will force a file sync every 1s at 115200bps (14,400 bytes per second)
+        //or every 12 seconds at 9600bps
+      }
 
-    //If we haven't received any characters in 2s, goto sleep
-    if(idleTime++ > MAX_IDLE_TIME_MSEC) {
+    }
+    else if(idleTime > MAX_IDLE_TIME_MSEC) { //If we haven't received any characters in 2s, goto sleep
       file.sync(); //Sync the card before we go to sleep
 
       STAT1_PORT &= ~(1<<STAT1); //Turn off stat LED to save power
@@ -504,11 +501,22 @@ MYJUMP:
       power_spi_enable(); //After wake up, power up peripherals
       power_timer0_enable();
 
-      idleTime = millis(); //A received character woke us up to reset the idleTime
+      escape_chars_received = 0; // Clear the esc flag as it has timed out
+      idleTime = 0; //A received character woke us up to reset the idleTime
+    }
+    else {
+      idleTime++;
+      delay(1); //Burn 1ms waiting for new characters coming in
     }
 
-    delay(1); //Burn 1ms waiting for new characters coming in
   }
+
+  file.sync();
+  file.close(); // Done recording, close out the file
+
+    digitalWrite(statled1, LOW); // Turn off indicator LED
+
+  NewSerial.print("~"); // Indicate a successful record
 
   return(1); //Success!
 }
@@ -663,7 +671,7 @@ void read_system_settings(void)
     setting_echo = ON; //Reset to echo on
     EEPROM.write(LOCATION_ECHO, setting_echo);
   }
-  
+
   //Set flags for extended mode options  
   if (setting_verbose == ON)
     feedback_mode |= EXTENDED_INFO;
@@ -693,7 +701,7 @@ void read_config_file(void)
     file.close();
     rootDirectory.close(); //Close out the file system before we open a new one
 
-    //Record the current eeprom settings to the config file
+      //Record the current eeprom settings to the config file
     record_config_file();
     return;
   }
@@ -737,7 +745,7 @@ void read_config_file(void)
   uint8_t i = 0, j = 0, setting_number = 0;
   char new_setting[7]; //Max length of a setting is 6, the bps setting = '115200' plus '\0'
   uint8_t new_setting_int = 0;
-  
+
   for(i = 0 ; i < len; i++)
   {
     //Pick out one setting from the line of text
@@ -750,7 +758,7 @@ void read_config_file(void)
 
     new_setting[j] = '\0'; //Terminate the string for array compare
     new_setting_int = atoi(new_setting); //Convert string to int
-    
+
     if(setting_number == 0) //Baud rate
     {
       if( strcmp(new_setting, "2400") == 0) new_system_baud = BAUD_2400;
@@ -973,7 +981,7 @@ void record_config_file(void)
   //Add a decoder line to the file
   file.write("\n\rbaud,escape,esc#,mode,verb,echo\0"); //Add this string to the file
 
-  file.sync(); //Sync all newly written data to card
+    file.sync(); //Sync all newly written data to card
   file.close(); //Close this file
   rootDirectory.close(); //Close this file structure instance
   //Now that the new config file has the current system settings, nothing else to do!
@@ -1523,7 +1531,7 @@ void command_shell(void)
         record_config_file(); //Put this new setting into the config file
 
 #ifdef INCLUDE_SIMPLE_EMBEDDED
-        command_succedded = (tmp_var == 0);
+          command_succedded = (tmp_var == 0);
 #endif
       }
     }
@@ -1543,12 +1551,12 @@ void command_shell(void)
           setting_verbose = OFF;
           feedback_mode &= ((uint8_t)~EXTENDED_INFO);
         }
-          
+
         EEPROM.write(LOCATION_VERBOSE, setting_verbose); //Commit this setting to EEPROM
         record_config_file(); //Put this new setting into the config file
-          
+
 #ifdef INCLUDE_SIMPLE_EMBEDDED
-        command_succedded = (tmp_var == 0);
+          command_succedded = (tmp_var == 0);
 #endif
       }
     }
@@ -1763,18 +1771,18 @@ void print_menu(void)
   NewSerial.println(F("OpenLog v3.1"));
   NewSerial.println(F("Basic commands:"));
   NewSerial.println(F("new <file>\t\t: Creates <file>"));
-  NewSerial.println(F("append <file>\t\t: Appends text to end of <file>. The text is read from the UART in a stream and is not echoed. Finish by sending Ctrl+z (ASCII 26)"));
+  NewSerial.println(F("append <file>\t\t: Appends text to end of <file>.\r\n\t\t\t  The text is read from the UART in a stream and is not echoed. Finish by sending Ctrl+z (ASCII 26)"));
 
   /*NewSerial.println(F("write <file> <offset>\t: Writes text to <file>, starting from <offset>. The text is read from the UART, line by line. Finish with an empty line"));
    NewSerial.println(F("rm <file>\t\t: Deletes <file>. Use wildcard to do a wildcard removal of files"));*/
 
-  NewSerial.println(F("md <directory>\t: Creates a directory called <directory>"));
+  NewSerial.println(F("md <directory>\t\t: Creates a directory called <directory>"));
 
   /*NewSerial.println(F("cd <directory>\t\t: Changes current working directory to <directory>"));
    NewSerial.println(F("cd ..\t\t: Changes to lower directory in tree"));*/
 
-  NewSerial.println(F("ls\t\t\t: Shows the content of the current directory. Use wildcard to do a wildcard listing of files in current directory"));
-  NewSerial.println(F("read <file> <start> <length> <type>\t\t: Writes ASCII <length> parts of <file> to the terminal starting at <start>. Omit <start> and <length> to read whole file. <type> 1 prints in ASCII, 2 in HEX."));
+  NewSerial.println(F("ls\t\t\t: Shows the content of the current directory.\r\n\t\t\t  Use wildcard to do a wildcard listing of files in current directory"));
+  NewSerial.println(F("read <file> <start> <length> <type>\r\n\t\t\t: Writes ASCII <length> parts of <file> to the terminal starting at <start>. \r\n\t\t\t  Omit <start> and <length> to read whole file. <type> 1 prints in ASCII, 2 in HEX."));
   NewSerial.println(F("size <file>\t\t: Write size of file to terminal"));
   NewSerial.println(F("disk\t\t\t: Shows card manufacturer, status, filesystem capacity and free storage space"));
 
@@ -1823,7 +1831,7 @@ void baud_menu(void)
     //Read command
     while(!NewSerial.available());
     char command = NewSerial.read();
-    
+
     //Execute command
     if(command == '1')
     {
@@ -1948,7 +1956,7 @@ void system_menu(void)
     //Read command
     while(!NewSerial.available());
     char command = NewSerial.read();
-    
+
     //Execute command
     if(command == '1')
     {
@@ -2207,6 +2215,12 @@ uint8_t wildcmp(const char* wild, const char* string)
 
 //End wildcard functions
 //=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+
+
+
+
+
+
 
 
 
