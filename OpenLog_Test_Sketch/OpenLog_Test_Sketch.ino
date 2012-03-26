@@ -52,7 +52,7 @@ void setup()
   Serial.println(); 
   Serial.println("Run OpenLog Test"); 
 
-  int testAmt = 30;
+  int testAmt = 10;
   //At 9600, testAmt of 4 takes about 1 minute, 10 takes about 3 minutes
   //At 57600, testAmt of 10 takes about 1 minute, 40 takes about 5 minutes
   //At 115200, testAmt of 30 takes about 1 minute

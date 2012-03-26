@@ -117,13 +117,18 @@
  
  Added a maxLoop variable calculation to figure out how many bytes to receive before we do a forced file.sync.
  
+ 
+ v3.11 Added freeMemory support for RAM testing.
+ 
+ This was taken from: http://arduino.cc/playground/Code/AvailableMemory
+ 
  */
 
 #include <SdFat.h> //We do not use the built-in SD.h file because it calls Serial.print
 #include <SerialPort.h> //This is a new/beta library written by Bill Greiman. You rock Bill!
 #include <EEPROM.h>
 
-SerialPort<0, 500, 0> NewSerial;
+SerialPort<0, 600, 0> NewSerial;
 //This is a very important buffer declaration. This sets the <port #, rx size, tx size>. We set
 //the TX buffer to zero because we will be spending most of our time needing to buffer the incoming (RX) characters.
 //900 works on minimal implementation, doesn't work with the full command prompt
@@ -144,6 +149,10 @@ SerialPort<0, 500, 0> NewSerial;
 //RAM. This debug mode allows us to view available RAM at various stages of the program
 //#define RAM_TESTING  1 //On
 #define RAM_TESTING  0 //Off
+
+#if RAM_TESTING
+#include "MemoryFree.h"
+#endif
 
 //#define Reset_AVR() wdt_enable(WDTO_1S); while(1) {} //Correct way of resetting the ATmega, but doesn't work with 
 //Arduino pre-Optiboot bootloader
@@ -309,7 +318,7 @@ void loop(void)
 {
   //If we are in new log mode, find a new file name to write to
   if(setting_system_mode == MODE_NEWLOG)
-    newlog();
+    newlog(); //Begin writing to file
 
   //If we are in sequential log mode, determine if seqlog.txt has been created or not, and then open it for logging
   if(setting_system_mode == MODE_SEQLOG)
@@ -367,7 +376,7 @@ void newlog(void)
     if(new_file_number > 65533) //There is a max of 65534 logs
     {
       NewSerial.print(F("!Too many logs:2!"));
-      return;
+      return; //Bail!
     }
 
     sprintf(new_file_name, "LOG%05d.TXT", new_file_number); //Splice the new file number into this file name
@@ -376,7 +385,6 @@ void newlog(void)
     if (file.open(&currentDirectory, new_file_name, O_CREAT | O_EXCL | O_WRITE)) break;
   }
   file.close(); //Close this new file we just opened
-  //file.writeError = false; // clear any write errors
 
   //Record new_file number to EEPROM
   lsb = (uint8_t)(new_file_number & 0x00FF);
@@ -392,7 +400,6 @@ void newlog(void)
   NewSerial.println(new_file_name);
 #endif
 
-  //Begin writing to file
   append_file(new_file_name);
 }
 
@@ -425,8 +432,8 @@ void seqlog(void)
 //Does not exit until Ctrl+z (ASCII 26) is received
 //Returns 0 on error
 //Returns 1 on success
-uint8_t append_file(char* file_name)
-{
+uint8_t append_file(char* file_name) {
+
   // O_CREAT - create the file if it does not exist
   // O_APPEND - seek to the end of the file prior to each write
   // O_WRITE - open for write
@@ -440,11 +447,6 @@ uint8_t append_file(char* file_name)
 
   NewSerial.print('<'); //give a different prompt to indicate no echoing
   digitalWrite(statled1, HIGH); //Turn on indicator LED
-
-#if RAM_TESTING
-  NewSerial.print("Free RAM receive ready: ");
-  NewSerial.println(memoryTest());
-#endif
 
 #define LOCAL_BUFF_SIZE  32
   uint8_t localBuffer[LOCAL_BUFF_SIZE];
@@ -466,13 +468,17 @@ uint8_t append_file(char* file_name)
   if(setting_uart_speed == BAUD_57600) maxLoops = 57600;
   if(setting_uart_speed == BAUD_115200) maxLoops = 115200;
   maxLoops /= 8; //Convert to bytes per second
-  maxLoops /= LOCAL_BUFF_SIZE; //Convert to # of loops
+  maxLoops /= LOCAL_BUFF_SIZE; //Convert to # of loops per second
 
 #if DEBUG
   NewSerial.print("maxLoops: ");
   NewSerial.println(maxLoops);
 #endif
 
+#if RAM_TESTING
+  NewSerial.print("freeMemory=");
+  NewSerial.println(freeMemory());
+#endif
 
   //Start recording incoming characters
   while(escape_chars_received < setting_max_escape_character) {
@@ -780,13 +786,13 @@ void read_config_file(void)
 
     if(setting_number == 0) //Baud rate
     {
-      if( strcmp(new_setting, "2400") == 0) new_system_baud = BAUD_2400;
-      else if( strcmp(new_setting, "4800") == 0) new_system_baud = BAUD_4800;
-      else if( strcmp(new_setting, "9600") == 0) new_system_baud = BAUD_9600;
-      else if( strcmp(new_setting, "19200") == 0) new_system_baud = BAUD_19200;
-      else if( strcmp(new_setting, "38400") == 0) new_system_baud = BAUD_38400;
-      else if( strcmp(new_setting, "57600") == 0) new_system_baud = BAUD_57600;
-      else if( strcmp(new_setting, "115200") == 0) new_system_baud = BAUD_115200;
+      if(strcmp(new_setting, "2400") == 0) new_system_baud = BAUD_2400;
+      else if(strcmp(new_setting, "4800") == 0) new_system_baud = BAUD_4800;
+      else if(strcmp(new_setting, "9600") == 0) new_system_baud = BAUD_9600;
+      else if(strcmp(new_setting, "19200") == 0) new_system_baud = BAUD_19200;
+      else if(strcmp(new_setting, "38400") == 0) new_system_baud = BAUD_38400;
+      else if(strcmp(new_setting, "57600") == 0) new_system_baud = BAUD_57600;
+      else if(strcmp(new_setting, "115200") == 0) new_system_baud = BAUD_115200;
       else new_system_baud = BAUD_9600; //Default is 9600bps
     }
     else if(setting_number == 1) //Escape character
@@ -1787,7 +1793,7 @@ uint8_t gotoDir(char *dir)
 
 void print_menu(void)
 {
-  NewSerial.println(F("OpenLog v3.1"));
+  NewSerial.println(F("OpenLog v3.11"));
   NewSerial.println(F("Basic commands:"));
   NewSerial.println(F("new <file>\t\t: Creates <file>"));
   NewSerial.println(F("append <file>\t\t: Appends text to end of <file>.\r\n\t\t\t  The text is read from the UART in a stream and is not echoed. Finish by sending Ctrl+z (ASCII 26)"));
@@ -2234,6 +2240,8 @@ uint8_t wildcmp(const char* wild, const char* string)
 
 //End wildcard functions
 //=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+
+
 
 
 
