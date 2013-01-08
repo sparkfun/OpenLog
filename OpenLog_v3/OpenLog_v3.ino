@@ -121,14 +121,19 @@
  v3.11 Added freeMemory support for RAM testing.
  
  This was taken from: http://arduino.cc/playground/Code/AvailableMemory
+
+
+ v3.12 Using freeMemory() function from JeeLabs. Seems to be working well.
  
+ Echo on/off is working again with a reduction of the buffer from 600 to 500.
+ Code size is up a bit to 29,282. We have free RAM of about 527 after "2" and 444 once we've begun append_file.
  */
 
 #include <SdFat.h> //We do not use the built-in SD.h file because it calls Serial.print
 #include <SerialPort.h> //This is a new/beta library written by Bill Greiman. You rock Bill!
 #include <EEPROM.h>
 
-SerialPort<0, 600, 0> NewSerial;
+SerialPort<0, 500, 0> NewSerial;
 //This is a very important buffer declaration. This sets the <port #, rx size, tx size>. We set
 //the TX buffer to zero because we will be spending most of our time needing to buffer the incoming (RX) characters.
 //900 works on minimal implementation, doesn't work with the full command prompt
@@ -149,10 +154,6 @@ SerialPort<0, 600, 0> NewSerial;
 //RAM. This debug mode allows us to view available RAM at various stages of the program
 //#define RAM_TESTING  1 //On
 #define RAM_TESTING  0 //Off
-
-#if RAM_TESTING
-#include "MemoryFree.h"
-#endif
 
 //#define Reset_AVR() wdt_enable(WDTO_1S); while(1) {} //Correct way of resetting the ATmega, but doesn't work with 
 //Arduino pre-Optiboot bootloader
@@ -221,7 +222,7 @@ const uint8_t statled2 = 13; //This is the SPI LED, indicating SD traffic
 Sd2Card card;
 SdVolume volume;
 SdFile currentDirectory;
-SdFile file;
+//SdFile file;
 
 uint8_t setting_uart_speed; //This is the baud rate that the system runs at, default is 9600
 uint8_t setting_system_mode; //This is the mode the system runs in, default is MODE_NEWLOG
@@ -244,6 +245,21 @@ struct command_arg
 static struct command_arg cmd_arg[MAX_COUNT_COMMAND_LINE_ARGS];
 uint8_t feedback_mode = (ECHO | EXTENDED_INFO);
 
+//Passes back the available amount of free RAM
+int freeRam () 
+{
+  extern int __heap_start, *__brkval; 
+  int v; 
+  return (int) &v - (__brkval == 0 ? (int) &__heap_start : (int) __brkval); 
+}
+void printRam() 
+{
+#if RAM_TESTING
+  NewSerial.print(F(" RAM:"));
+  NewSerial.println(freeRam());
+#endif
+}
+
 //Store error strings in flash to save RAM
 void error(const char *str) {
   NewSerial.print(F("error: "));
@@ -252,7 +268,7 @@ void error(const char *str) {
   if (card.errorCode()) {
     NewSerial.print(F("SD error: "));
     NewSerial.print(card.errorCode(), HEX);
-    NewSerial.print(',');
+    NewSerial.print(F(","));
     NewSerial.println(card.errorData(), HEX);
   }
 
@@ -290,7 +306,7 @@ void setup(void)
   if(setting_uart_speed == BAUD_38400) NewSerial.begin(38400);
   if(setting_uart_speed == BAUD_57600) NewSerial.begin(57600);
   if(setting_uart_speed == BAUD_115200) NewSerial.begin(115200);
-  NewSerial.print("1");
+  NewSerial.print(F("1"));
 
   //Setup SD & FAT
   if (!card.init(SPI_FULL_SPEED)) {
@@ -301,12 +317,16 @@ void setup(void)
     NewSerial.print(F("error volume.init")); 
     blink_error(ERROR_SD_INIT);
   }
+
+  currentDirectory.close(); //We close the cD before opening root. This comes from QuickStart example. Saves 4 bytes.
   if (!currentDirectory.openRoot(&volume)) {
     NewSerial.print(F("error openRoot")); 
     blink_error(ERROR_SD_INIT);
   }
 
-  NewSerial.print("2");
+  NewSerial.print(F("2"));
+
+  printRam(); //Print the available RAM
 
   //Search for a config file and load any settings found. This will over-ride previous EEPROM settings if found.
   read_config_file();
@@ -318,7 +338,7 @@ void loop(void)
 {
   //If we are in new log mode, find a new file name to write to
   if(setting_system_mode == MODE_NEWLOG)
-    newlog(); //Begin writing to file
+    append_file(newlog()); //Append the file name that newlog() returns
 
   //If we are in sequential log mode, determine if seqlog.txt has been created or not, and then open it for logging
   if(setting_system_mode == MODE_SEQLOG)
@@ -334,10 +354,12 @@ void loop(void)
 //Checks the spots in EEPROM for the next available LOG# file name
 //Updates EEPROM and then appends to the new log file.
 //Limited to 65535 files but this should not always be the case.
-void newlog(void)
+char* newlog(void)
 {
   uint8_t msb, lsb;
   uint16_t new_file_number;
+  
+  SdFile newFile; //This will contain the file for SD writing
 
   //Combine two 8-bit EEPROM spots into one 16-bit number
   lsb = EEPROM.read(LOCATION_FILE_NUMBER_LSB);
@@ -363,7 +385,7 @@ void newlog(void)
   {
     //Gracefully drop out to command prompt with some error
     NewSerial.print(F("!Too many logs:1!"));
-    return; //Bail!
+    return(0); //Bail!
   }
 
   //If we made it this far, everything looks good - let's start testing to see if our file number is the next available
@@ -376,19 +398,19 @@ void newlog(void)
     if(new_file_number > 65533) //There is a max of 65534 logs
     {
       NewSerial.print(F("!Too many logs:2!"));
-      return; //Bail!
+      return(0); //Bail!
     }
 
     sprintf(new_file_name, "LOG%05d.TXT", new_file_number); //Splice the new file number into this file name
 
     //Try to open file, if fail (file doesn't exist), then break
-    if (file.open(&currentDirectory, new_file_name, O_CREAT | O_EXCL | O_WRITE)) break;
+    if (newFile.open(&currentDirectory, new_file_name, O_CREAT | O_EXCL | O_WRITE)) break;
   }
-  file.close(); //Close this new file we just opened
+  newFile.close(); //Close this new file we just opened
 
   //Record new_file number to EEPROM
-  lsb = (uint8_t)(new_file_number & 0x00FF);
-  msb = (uint8_t)((new_file_number & 0xFF00) >> 8);
+  lsb = (byte)(new_file_number & 0x00FF);
+  msb = (byte)((new_file_number & 0xFF00) >> 8);
 
   EEPROM.write(LOCATION_FILE_NUMBER_LSB, lsb); // LSB
 
@@ -400,7 +422,8 @@ void newlog(void)
   NewSerial.println(new_file_name);
 #endif
 
-  append_file(new_file_name);
+  //  append_file(new_file_name);
+  return(new_file_name);
 }
 
 //Log to the same file every time the system boots, sequentially
@@ -412,17 +435,19 @@ void newlog(void)
 void seqlog(void)
 {
   char seq_file_name[13] = "SEQLOG00.TXT";
+  
+  SdFile seqFile;
 
   //Try to create sequential file
-  if (!file.open(&currentDirectory, seq_file_name, O_CREAT | O_WRITE))
+  if (!seqFile.open(&currentDirectory, seq_file_name, O_CREAT | O_WRITE))
   {
     NewSerial.print(F("Error creating SEQLOG\n"));
     return;
   }
 
-  file.close(); //Close this new file we just opened
+  seqFile.close(); //Close this new file we just opened
 
-  append_file(seq_file_name);
+  append_file(seq_file_name); 
 }
 
 //This is the most important function of the device. These loops have been tweaked as much as possible.
@@ -432,20 +457,23 @@ void seqlog(void)
 //Does not exit until Ctrl+z (ASCII 26) is received
 //Returns 0 on error
 //Returns 1 on success
-uint8_t append_file(char* file_name) {
+uint8_t append_file(char* file_name)
+{
+  
+  SdFile workingFile;
 
   // O_CREAT - create the file if it does not exist
   // O_APPEND - seek to the end of the file prior to each write
   // O_WRITE - open for write
-  if (!file.open(&currentDirectory, file_name, O_CREAT | O_APPEND | O_WRITE)) error("open1");
-  if (file.fileSize() == 0) {
+  if (!workingFile.open(&currentDirectory, file_name, O_CREAT | O_APPEND | O_WRITE)) error("open1");
+  if (workingFile.fileSize() == 0) {
     //This is a trick to make sure first cluster is allocated - found in Bill's example/beta code
-    //file.write((uint8_t)0); //Leaves a NUL at the beginning of a file
-    file.rewind();
-    file.sync();
+    //workingFile.write((uint8_t)0); //Leaves a NUL at the beginning of a file
+    workingFile.rewind();
+    workingFile.sync();
   }  
 
-  NewSerial.print('<'); //give a different prompt to indicate no echoing
+  NewSerial.print(F("<")); //give a different prompt to indicate no echoing
   digitalWrite(statled1, HIGH); //Turn on indicator LED
 
 #define LOCAL_BUFF_SIZE  32
@@ -458,7 +486,7 @@ uint8_t append_file(char* file_name) {
   uint8_t escape_chars_received = 0;
 
   //Ugly calculation to figure out how many times to loop before we need to force a record (file.sync())
-  uint32_t maxLoops;
+  uint32_t maxLoops = 450;
   uint16_t timeSinceLastRecord = 0; //Sync the file every maxLoop # of bytes
   if(setting_uart_speed == BAUD_2400) maxLoops = 2400; //Set bits per second
   if(setting_uart_speed == BAUD_4800) maxLoops = 4800;
@@ -471,13 +499,12 @@ uint8_t append_file(char* file_name) {
   maxLoops /= LOCAL_BUFF_SIZE; //Convert to # of loops per second
 
 #if DEBUG
-  NewSerial.print("maxLoops: ");
+  NewSerial.print(F("maxLoops: "));
   NewSerial.println(maxLoops);
 #endif
 
 #if RAM_TESTING
-  NewSerial.print("freeMemory=");
-  NewSerial.println(freeMemory());
+  printRam(); //Print the available RAM
 #endif
 
   //Start recording incoming characters
@@ -502,7 +529,7 @@ uint8_t append_file(char* file_name) {
         }
       }
 
-      file.write(localBuffer, n); //Record the buffer to the card
+      workingFile.write(localBuffer, n); //Record the buffer to the card
 
       STAT1_PORT ^= (1<<STAT1); //Toggle the STAT1 LED each time we record the buffer
 
@@ -510,12 +537,12 @@ uint8_t append_file(char* file_name) {
 
       if(timeSinceLastRecord++ > maxLoops) { //This will force a sync approximately every second
         timeSinceLastRecord = 0;
-        file.sync(); //Sync the card
+        workingFile.sync(); //Sync the card
       }
 
     }
     else if(idleTime > MAX_IDLE_TIME_MSEC) { //If we haven't received any characters in 2s, goto sleep
-      file.sync(); //Sync the card before we go to sleep
+      workingFile.sync(); //Sync the card before we go to sleep
 
       STAT1_PORT &= ~(1<<STAT1); //Turn off stat LED to save power
 
@@ -536,12 +563,12 @@ uint8_t append_file(char* file_name) {
 
   }
 
-  file.sync();
-  file.close(); // Done recording, close out the file
+  workingFile.sync();
+  workingFile.close(); // Done recording, close out the file
 
     digitalWrite(statled1, LOW); // Turn off indicator LED
 
-  NewSerial.print("~"); // Indicate a successful record
+  NewSerial.print(F("~")); // Indicate a successful record
 
   return(1); //Success!
 }
@@ -712,18 +739,19 @@ void read_system_settings(void)
 void read_config_file(void)
 {
   SdFile rootDirectory;
+  SdFile configFile;  
   if (!rootDirectory.openRoot(&volume)) error("openRoot"); // open the root directory
 
-  char configFileName[13];
+  char configFileName[12]; //Limited to 8.3
   sprintf(configFileName, CFG_FILENAME); //This is the name of the config file. 'config.sys' is probably a bad idea.
 
   //Check to see if we have a config file
-  if (!file.open(&rootDirectory, configFileName, O_READ)) {
+  if (!configFile.open(&rootDirectory, configFileName, O_READ)) {
     //If we don't have a config file already, then create config file and record the current system settings to the file
 #if DEBUG
     NewSerial.println(F("No config found - creating default:"));
 #endif
-    file.close();
+    configFile.close();
     rootDirectory.close(); //Close out the file system before we open a new one
 
       //Record the current eeprom settings to the config file
@@ -741,20 +769,20 @@ void read_config_file(void)
   int len;
   uint8_t settings_string[CFG_LENGTH]; //"115200,103,14,0,1,1\0" = 115200 bps, escape char of ASCII(103), 14 times, new log mode, verbose on, echo on.
   for(len = 0 ; len < CFG_LENGTH ; len++) {
-    if( (c = file.read()) < 0) break; //We've reached the end of the file
+    if( (c = configFile.read()) < 0) break; //We've reached the end of the file
     if(c == '\0') break; //Bail if we hit the end of this string
     settings_string[len] = c;
   }
-  file.close();
+  configFile.close();
   rootDirectory.close();
 
 #if DEBUG
   //Print line for debugging
-  NewSerial.print("Text Settings: ");
+  NewSerial.print(F("Text Settings: "));
   for(int i = 0; i < len; i++)
     NewSerial.write(settings_string[i]);
   NewSerial.println();
-  NewSerial.print("Len: ");
+  NewSerial.print(F("Len: "));
   NewSerial.println(len);
 #endif
 
@@ -941,30 +969,28 @@ void record_config_file(void)
   //config file will not be found and it will be created in some erroneus directory. The changes to user settings may be lost on the
   //next power cycles. To prevent this, we will open another instance of the file system, then close it down when we are done.
   SdFile rootDirectory;
+  SdFile myFile;
   if (!rootDirectory.openRoot(&volume)) error("openRoot"); // open the root directory
 
   char configFileName[strlen(CFG_FILENAME)];
   sprintf(configFileName, CFG_FILENAME); //This is the name of the config file. 'config.sys' is probably a bad idea.
 
   //If there is currently a config file, trash it
-  if (file.open(&rootDirectory, configFileName, O_WRITE)) {
-#if DEBUG
-    NewSerial.println(F("Deleting config"));
-#endif
-    if (!file.remove()){
+  if (myFile.open(&rootDirectory, configFileName, O_WRITE)) {
+    if (!myFile.remove()){
       NewSerial.println(F("Remove config failed"));
-      file.close(); //Close this file
+      myFile.close(); //Close this file
       rootDirectory.close(); //Close this file structure instance
       return;
     }
   }
 
-  //file.close(); //Not sure if we need to close the file before we try to reopen it
+  //myFile.close(); //Not sure if we need to close the file before we try to reopen it
 
   //Create config file
-  if (file.open(&rootDirectory, configFileName, O_CREAT | O_APPEND | O_WRITE) == 0) {
+  if (myFile.open(&rootDirectory, configFileName, O_CREAT | O_APPEND | O_WRITE) == 0) {
     NewSerial.println(F("Create config failed"));
-    file.close(); //Close this file
+    myFile.close(); //Close this file
     rootDirectory.close(); //Close this file structure instance
     return;
   }
@@ -1000,14 +1026,15 @@ void record_config_file(void)
 #endif
 
   //Record current system settings to the config file
-  if(file.write((uint8_t*)settings_string, strlen(settings_string)) != strlen(settings_string))
+  if(myFile.write((uint8_t*)settings_string, strlen(settings_string)) != strlen(settings_string))
     NewSerial.println(F("error writing to file"));
 
   //Add a decoder line to the file
-  file.write("\n\rbaud,escape,esc#,mode,verb,echo\0"); //Add this string to the file
+  //myFile.write(F("\n\rbaud,escape,esc#,mode,verb,echo\0")); //Add this string to the file
+  //This line takes 36 bytes of RAM. We need to move the string to PROGMEM
 
-    file.sync(); //Sync all newly written data to card
-  file.close(); //Close this file
+  myFile.sync(); //Sync all newly written data to card
+  myFile.close(); //Close this file
   rootDirectory.close(); //Close this file structure instance
   //Now that the new config file has the current system settings, nothing else to do!
 }
@@ -1020,12 +1047,16 @@ void command_shell(void)
 {
   //Provide a simple shell
   char buffer[30];
-  uint8_t tmp_var;
+  byte tmp_var;
+  
+  SdFile tempFile;
 
 #ifdef INCLUDE_SIMPLE_EMBEDDED
   uint32_t file_index;
   uint8_t command_succedded = 1;
 #endif //INCLUDE_SIMPLE_EMBEDDED
+
+  printRam(); //Print the available RAM
 
   while(true)
   {
@@ -1034,9 +1065,9 @@ void command_shell(void)
       NewSerial.print((char)0x1A); // Ctrl+Z ends the data and marks the start of result
 
     if (command_succedded == 0)
-      NewSerial.print('!');
+      NewSerial.print(F("!"));
 #endif
-    NewSerial.print('>');
+    NewSerial.print(F(">"));
 
     //Read command
     if(read_line(buffer, sizeof(buffer)) < 1)
@@ -1170,10 +1201,10 @@ void command_shell(void)
       if ((count_cmd_args() == 3) && (strncmp(command_arg, "-rf", 3) == 0))
       {
         //Remove the subfolder
-        if (file.open(&currentDirectory, get_cmd_arg(2), O_READ))
+        if (tempFile.open(&currentDirectory, get_cmd_arg(2), O_READ))
         {
-          tmp_var = file.rmRfStar();
-          file.close();
+          tmp_var = tempFile.rmRfStar();
+          tempFile.close();
 #ifdef INCLUDE_SIMPLE_EMBEDDED
           command_succedded = tmp_var;
 #endif
@@ -1182,21 +1213,21 @@ void command_shell(void)
       }
 
       //Argument 2: Remove subfolder if empty or remove file
-      if (file.open(&currentDirectory, command_arg, O_READ))
+      if (tempFile.open(&currentDirectory, command_arg, O_READ))
       {
         tmp_var = 0;
-        if (file.isDir() || file.isSubDir())
-          tmp_var = file.rmDir();
+        if (tempFile.isDir() || tempFile.isSubDir())
+          tmp_var = tempFile.rmDir();
         else
         {
-          file.close();
-          if (file.open(&currentDirectory, command_arg, O_WRITE))
-            tmp_var = file.remove();
+          tempFile.close();
+          if (tempFile.open(&currentDirectory, command_arg, O_WRITE))
+            tmp_var = tempFile.remove();
         }
 #ifdef INCLUDE_SIMPLE_EMBEDDED
         command_succedded = tmp_var;
 #endif
-        file.close();
+        tempFile.close();
         continue;
       }
 
@@ -1238,7 +1269,7 @@ void command_shell(void)
         continue;
 
       //search file in current directory and open it
-      if (!file.open(&currentDirectory, command_arg, O_READ)) {
+      if (!tempFile.open(&currentDirectory, command_arg, O_READ)) {
         if ((feedback_mode & EXTENDED_INFO) > 0)
         {
           NewSerial.print(F("Failed to open file "));
@@ -1251,13 +1282,13 @@ void command_shell(void)
       if ((command_arg = get_cmd_arg(2)) != 0) {
         if ((command_arg = is_number(command_arg, strlen(command_arg))) != 0) {
           int32_t offset = strtolong(command_arg);
-          if(!file.seekSet(offset)) {
+          if(!tempFile.seekSet(offset)) {
             if ((feedback_mode & EXTENDED_INFO) > 0)
             {
               NewSerial.print(F("Error seeking to "));
               NewSerial.println(command_arg);
             }
-            file.close();
+            tempFile.close();
             continue;
           }
         }
@@ -1279,7 +1310,7 @@ void command_shell(void)
       uint8_t c;
       int16_t v;
       int16_t readSpot = 0;
-      while ((v = file.read()) >= 0) {
+      while ((v = tempFile.read()) >= 0) {
         //file.read() returns a 16 bit character. We want to be able to print extended ASCII
         //So we need 8 bit unsigned.
         c = v; //Force the 16bit signed variable into an 8bit unsigned
@@ -1292,7 +1323,7 @@ void command_shell(void)
           else if (c == '\n' || c == '\r')
             NewSerial.write(c); //Go ahead and print the carriage returns and new lines
           else
-            NewSerial.write('.'); //For non visible ASCII characters, print a .
+            NewSerial.write(F(".")); //For non visible ASCII characters, print a .
         }
         else if (printType == 2) {
           NewSerial.print(c, HEX); //Print in HEX
@@ -1303,7 +1334,7 @@ void command_shell(void)
         }
 
       }
-      file.close();
+      tempFile.close();
 #ifdef INCLUDE_SIMPLE_EMBEDDED
       command_succedded = 1;
       if ((feedback_mode & EMBEDDED_END_MARKER) == 0)
@@ -1318,7 +1349,7 @@ void command_shell(void)
         continue;
 
       //search file in current directory and open it
-      if (!file.open(&currentDirectory, command_arg, O_WRITE)) {
+      if (!tempFile.open(&currentDirectory, command_arg, O_WRITE)) {
         if ((feedback_mode & EXTENDED_INFO) > 0)
         {
           NewSerial.print(F("Failed to open file "));
@@ -1331,13 +1362,13 @@ void command_shell(void)
       if ((command_arg = get_cmd_arg(2)) != 0){
         if ((command_arg = is_number(command_arg, strlen(command_arg))) != 0) {
           int32_t offset = strtolong(command_arg);
-          if(!file.seekSet(offset)) {
+          if(!tempFile.seekSet(offset)) {
             if ((feedback_mode & EXTENDED_INFO) > 0)
             {
               NewSerial.print(F("Error seeking to "));
               NewSerial.println(command_arg);
             }
-            file.close();
+            tempFile.close();
             continue;
           }
         }
@@ -1350,9 +1381,9 @@ void command_shell(void)
         if ((feedback_mode & EMBEDDED_END_MARKER) > 0)
           NewSerial.print((char)0x1A); // Ctrl+Z ends the data and marks the start of result
 #endif
-        NewSerial.print("<"); //give a different prompt
+        NewSerial.print(F("<")); //give a different prompt
 
-          //read one line of text
+        //read one line of text
         dataLen = read_line(buffer, sizeof(buffer));
         if(!dataLen) {
 #ifdef INCLUDE_SIMPLE_EMBEDDED
@@ -1362,14 +1393,14 @@ void command_shell(void)
         }
 
         //write text to file
-        if(file.write((uint8_t*) buffer, dataLen) != dataLen) {
+        if(tempFile.write((uint8_t*) buffer, dataLen) != dataLen) {
           if ((feedback_mode & EXTENDED_INFO) > 0)
             NewSerial.print(F("error writing to file\n\r"));
           break;
         }
       }
 
-      file.close();
+      tempFile.close();
     }
     else if(strncmp(command_arg, "size", 4) == 0)
     {
@@ -1379,9 +1410,9 @@ void command_shell(void)
         continue;
 
       //search file in current directory and open it
-      if (file.open(&currentDirectory, command_arg, O_READ)) {
-        NewSerial.print(file.fileSize());
-        file.close();
+      if (tempFile.open(&currentDirectory, command_arg, O_READ)) {
+        NewSerial.print(tempFile.fileSize());
+        tempFile.close();
 #ifdef INCLUDE_SIMPLE_EMBEDDED
         command_succedded = 1;
 #endif
@@ -1435,7 +1466,7 @@ void command_shell(void)
 
       NewSerial.print(F("\n\rVersion: "));
       NewSerial.print(cid.prv_n, DEC);
-      NewSerial.print('.');
+      NewSerial.print(F("."));
       NewSerial.println(cid.prv_m, DEC);
 
       NewSerial.print(F("Serial number: "));
@@ -1443,7 +1474,7 @@ void command_shell(void)
 
       NewSerial.print(F("Manufacturing date: "));
       NewSerial.print(cid.mdt_month);
-      NewSerial.print('/');
+      NewSerial.print(F("/"));
       NewSerial.println(2000 + cid.mdt_year_low + (cid.mdt_year_high <<4));
 
       csd_t csd;
@@ -1467,7 +1498,7 @@ void command_shell(void)
     {
       //Flush all current data and record it to card
       //This isn't really tested.
-      file.sync();
+      tempFile.sync();
       currentDirectory.sync();
 #ifdef INCLUDE_SIMPLE_EMBEDDED
       command_succedded = 1;
@@ -1489,8 +1520,8 @@ void command_shell(void)
         continue;
 
       //Try to open file, if fail (file doesn't exist), then break
-      if (file.open(&currentDirectory, command_arg, O_CREAT | O_EXCL | O_WRITE)) {//Will fail if file already exsists
-        file.close(); //Everything is good, Close this new file we just opened
+      if (tempFile.open(&currentDirectory, command_arg, O_CREAT | O_EXCL | O_WRITE)) {//Will fail if file already exsists
+        tempFile.close(); //Everything is good, Close this new file we just opened
 #ifdef INCLUDE_SIMPLE_EMBEDDED
         command_succedded = 1;
 #endif
@@ -1528,9 +1559,9 @@ void command_shell(void)
       for (uint8_t i = 0; i < tmp_var; i++)
       {
         NewSerial.print(folderTree[i]);
-        if (i < tmp_var-1) NewSerial.print("\\");
+        if (i < tmp_var-1) NewSerial.print(F("\\"));
       }
-      NewSerial.println("");
+      NewSerial.println();
 #ifdef INCLUDE_SIMPLE_EMBEDDED
       command_succedded = 1;
 #endif
@@ -1679,7 +1710,7 @@ uint8_t read_line(char* buffer, uint8_t buffer_length)
       buffer[read_length] = '\0';
 
       NewSerial.print((char)0x08);
-      NewSerial.print(' ');
+      NewSerial.print(F(" "));
       NewSerial.print((char)0x08);
 
       continue;
@@ -1851,7 +1882,7 @@ void baud_menu(void)
     NewSerial.println(F("x) Exit"));
 
     //Print prompt
-    NewSerial.print('>');
+    NewSerial.print(F(">"));
 
     //Read command
     while(!NewSerial.available());
@@ -1976,7 +2007,7 @@ void system_menu(void)
 
     NewSerial.println(F("x) Exit"));
     //Print prompt
-    NewSerial.print('>');
+    NewSerial.print(F(">"));
 
     //Read command
     while(!NewSerial.available());
@@ -2240,6 +2271,7 @@ uint8_t wildcmp(const char* wild, const char* string)
 
 //End wildcard functions
 //=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+
 
 
 
