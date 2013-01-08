@@ -152,8 +152,8 @@ SerialPort<0, 500, 0> NewSerial;
 
 //The bigger the receive buffer, the less likely we are to drop characters at high speed. However, the ATmega has a limited amount of
 //RAM. This debug mode allows us to view available RAM at various stages of the program
-//#define RAM_TESTING  1 //On
-#define RAM_TESTING  0 //Off
+#define RAM_TESTING  1 //On
+//#define RAM_TESTING  0 //Off
 
 //#define Reset_AVR() wdt_enable(WDTO_1S); while(1) {} //Correct way of resetting the ATmega, but doesn't work with 
 //Arduino pre-Optiboot bootloader
@@ -434,12 +434,10 @@ char* newlog(void)
 //Return anything else on sucess
 void seqlog(void)
 {
-  char seq_file_name[13] = "SEQLOG00.TXT";
-  
   SdFile seqFile;
 
   //Try to create sequential file
-  if (!seqFile.open(&currentDirectory, seq_file_name, O_CREAT | O_WRITE))
+  if (!seqFile.open(&currentDirectory, PSTR("SEQLOG00.TXT"), O_CREAT | O_WRITE))
   {
     NewSerial.print(F("Error creating SEQLOG\n"));
     return;
@@ -447,7 +445,7 @@ void seqlog(void)
 
   seqFile.close(); //Close this new file we just opened
 
-  append_file(seq_file_name); 
+  append_file(PSTR("SEQLOG00.TXT")); 
 }
 
 //This is the most important function of the device. These loops have been tweaked as much as possible.
@@ -814,13 +812,13 @@ void read_config_file(void)
 
     if(setting_number == 0) //Baud rate
     {
-      if(strcmp(new_setting, "2400") == 0) new_system_baud = BAUD_2400;
-      else if(strcmp(new_setting, "4800") == 0) new_system_baud = BAUD_4800;
-      else if(strcmp(new_setting, "9600") == 0) new_system_baud = BAUD_9600;
-      else if(strcmp(new_setting, "19200") == 0) new_system_baud = BAUD_19200;
-      else if(strcmp(new_setting, "38400") == 0) new_system_baud = BAUD_38400;
-      else if(strcmp(new_setting, "57600") == 0) new_system_baud = BAUD_57600;
-      else if(strcmp(new_setting, "115200") == 0) new_system_baud = BAUD_115200;
+      if(strcmp(new_setting, PSTR("2400")) == 0) new_system_baud = BAUD_2400;
+      else if(strcmp(new_setting, PSTR("4800")) == 0) new_system_baud = BAUD_4800;
+      else if(strcmp(new_setting, PSTR("9600")) == 0) new_system_baud = BAUD_9600;
+      else if(strcmp(new_setting, PSTR("19200")) == 0) new_system_baud = BAUD_19200;
+      else if(strcmp(new_setting, PSTR("38400")) == 0) new_system_baud = BAUD_38400;
+      else if(strcmp(new_setting, PSTR("57600")) == 0) new_system_baud = BAUD_57600;
+      else if(strcmp(new_setting, PSTR("115200")) == 0) new_system_baud = BAUD_115200;
       else new_system_baud = BAUD_9600; //Default is 9600bps
     }
     else if(setting_number == 1) //Escape character
@@ -1086,7 +1084,7 @@ void command_shell(void)
     char* command_arg = get_cmd_arg(0);
 
     //Execute command
-    if(strcmp(command_arg, "init") == 0)
+    if(strcmp(command_arg, PSTR("init")) == 0)
     {
       if ((feedback_mode & EXTENDED_INFO) > 0)
         NewSerial.println(F("Closing down file system"));
@@ -1104,7 +1102,7 @@ void command_shell(void)
 #endif
     }
 
-    else if(strncmp(command_arg, "?", 1) == 0)
+    else if(strncmp(command_arg, PSTR("?"), 1) == 0)
     {
       //Print available commands
       print_menu();
@@ -1114,7 +1112,7 @@ void command_shell(void)
 #endif
 
     }
-    else if(strcmp(command_arg, "help") == 0)
+    else if(strcmp(command_arg, PSTR("help")) == 0)
     {
       //Print available commands
       print_menu();
@@ -1124,7 +1122,7 @@ void command_shell(void)
 #endif
 
     }
-    else if(strcmp(command_arg, "baud") == 0)
+    else if(strcmp(command_arg, PSTR("baud")) == 0)
     {
       //Go into baud select menu
       baud_menu();
@@ -1134,7 +1132,7 @@ void command_shell(void)
 #endif
 
     }
-    else if(strcmp(command_arg, "set") == 0)
+    else if(strcmp(command_arg, PSTR("set")) == 0)
     {
       //Go into system setting menu
       system_menu();
@@ -1144,7 +1142,7 @@ void command_shell(void)
 #endif
     }
 
-    else if(strncmp(command_arg, "ls", 2) == 0)
+    else if(strncmp(command_arg, PSTR("ls"), 2) == 0)
     {
       if ((feedback_mode & EXTENDED_INFO) > 0)
       {
@@ -1163,7 +1161,7 @@ void command_shell(void)
 
     }
     //    else if(strncmp_P(command_arg, PSTR("md"), 2) == 0)
-    else if(strncmp(command_arg, "md", 2) == 0)
+    else if(strncmp(command_arg, PSTR("md"), 2) == 0)
     {
       //Argument 2: Directory name
       command_arg = get_cmd_arg(1);
@@ -1190,7 +1188,7 @@ void command_shell(void)
     // "rm -rf <subfolder>" removes the <subfolder> and all contents recursively
     // "rm <subfolder>" removes the <subfolder> only if its empty
     // "rm <filename>" removes the <filename>
-    else if(strncmp(command_arg, "rm", 2) == 0)
+    else if(strncmp(command_arg, PSTR("rm"), 2) == 0)
     {
       //Argument 2: Remove option or file name/subdirectory to remove
       command_arg = get_cmd_arg(1);
@@ -1247,7 +1245,7 @@ void command_shell(void)
         command_succedded = 1;
 #endif
     }
-    else if(strncmp(command_arg, "cd", 2) == 0)
+    else if(strncmp(command_arg, PSTR("cd"), 2) == 0)
     {
       //Argument 2: Directory name
       command_arg = get_cmd_arg(1);
@@ -1261,7 +1259,7 @@ void command_shell(void)
       command_succedded = tmp_var;
 #endif
     }
-    else if(strncmp(command_arg, "read", 4) == 0)
+    else if(strncmp(command_arg, PSTR("read"), 4) == 0)
     {
       //Argument 2: File name
       command_arg = get_cmd_arg(1);
@@ -1341,7 +1339,7 @@ void command_shell(void)
 #endif
         NewSerial.println();
     }
-    else if(strncmp(command_arg, "write", 5) == 0)
+    else if(strncmp(command_arg, PSTR("write"), 5) == 0)
     {
       //Argument 2: File name
       command_arg = get_cmd_arg(1);
@@ -1402,7 +1400,7 @@ void command_shell(void)
 
       tempFile.close();
     }
-    else if(strncmp(command_arg, "size", 4) == 0)
+    else if(strncmp(command_arg, PSTR("size"), 4) == 0)
     {
       //Argument 2: File name - no wildcard search
       command_arg = get_cmd_arg(1);
@@ -1427,7 +1425,7 @@ void command_shell(void)
 #endif
         NewSerial.println();
     }
-    else if(strcmp(command_arg, "disk") == 0)
+    else if(strcmp(command_arg, PSTR("disk")) == 0)
     {
       //Print card type
       NewSerial.print(F("\nCard type: "));
@@ -1494,7 +1492,7 @@ void command_shell(void)
       command_succedded = 1;
 #endif
     }
-    else if(strcmp(command_arg, "sync") == 0)
+    else if(strcmp(command_arg, PSTR("sync")) == 0)
     {
       //Flush all current data and record it to card
       //This isn't really tested.
@@ -1506,13 +1504,13 @@ void command_shell(void)
     }
 
     //Reset the AVR
-    else if(strcmp(command_arg, "reset") == 0)
+    else if(strcmp(command_arg, PSTR("reset")) == 0)
     {
       Reset_AVR();
     }
 
     //Create new file
-    else if(strncmp(command_arg, "new", 3) == 0)
+    else if(strncmp(command_arg, PSTR("new"), 3) == 0)
     {
       //Argument 2: File name
       command_arg = get_cmd_arg(1);
@@ -1536,7 +1534,7 @@ void command_shell(void)
     }
 
     //Append to a current file
-    else if(strncmp(command_arg, "append", 6) == 0)
+    else if(strncmp(command_arg, PSTR("append"), 6) == 0)
     {
       //Argument 2: File name
       //Find the end of a current file and begins writing to it
@@ -1552,7 +1550,7 @@ void command_shell(void)
 #endif
     }
 
-    else if(strcmp(command_arg, "pwd") == 0)
+    else if(strcmp(command_arg, PSTR("pwd")) == 0)
     {
       NewSerial.print(".\\");
       tmp_var = getNextFolderTreeIndex();
@@ -1567,7 +1565,7 @@ void command_shell(void)
 #endif
     }
     // echo <on>|<off>
-    else if(strncmp(command_arg, "echo", 4) == 0)
+    else if(strncmp(command_arg, PSTR("echo"), 4) == 0)
     {
       //Argument 2: <on>|<off>
       // Set if we are going to echo the characters back to the client or not
@@ -1592,18 +1590,18 @@ void command_shell(void)
       }
     }
     // verbose <on>|<off>
-    else if(strncmp(command_arg, "verbose", 7) == 0)
+    else if(strncmp(command_arg, PSTR("verbose"), 7) == 0)
     {
       //Argument 2: <on>|<off>
       // Set if we are going to show extended error information when executing commands
       command_arg = get_cmd_arg(1);
       if (command_arg != 0)
       {
-        if ((tmp_var = strncmp(command_arg, "on", 2)) == 0) {
+        if ((tmp_var = strncmp(command_arg, PSTR("on"), 2)) == 0) {
           setting_verbose = ON;
           feedback_mode |= EXTENDED_INFO;
         }
-        else if ((tmp_var = strncmp(command_arg, "off", 3)) == 0) {
+        else if ((tmp_var = strncmp(command_arg, PSTR("off"), 3)) == 0) {
           setting_verbose = OFF;
           feedback_mode &= ((uint8_t)~EXTENDED_INFO);
         }
@@ -1627,9 +1625,9 @@ void command_shell(void)
       command_arg = get_cmd_arg(1);
       if (command_arg != 0)
       {
-        if ((tmp_var = strncmp(command_arg, "on", 2)) == 0)
+        if ((tmp_var = strncmp(command_arg, PSTR("on"), 2)) == 0)
           feedback_mode |= EMBEDDED_END_MARKER;
-        else if ((tmp_var = strncmp(command_arg, "off", 3)) == 0)
+        else if ((tmp_var = strncmp(command_arg, PSTR("off"), 3)) == 0)
           feedback_mode &= ((uint8_t)~EMBEDDED_END_MARKER);
 
         command_succedded = (tmp_var == 0);
@@ -2271,19 +2269,3 @@ uint8_t wildcmp(const char* wild, const char* string)
 
 //End wildcard functions
 //=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
