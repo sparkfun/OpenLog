@@ -1016,7 +1016,6 @@ void record_config_file(void)
   //Config was successfully created, now record current system settings to the config file
 
   char settings_string[CFG_LENGTH]; //"115200,103,14,0,1,1\0" = 115200 bps, escape char of ASCII(103), 14 times, new log mode, verbose on, echo on.
-  char temp[CFG_LENGTH]; //This contains bits of the overall config string.
 
   //Before we read the EEPROM values, they've already been tested and defaulted in the read_system_settings function
   char current_system_baud = EEPROM.read(LOCATION_BAUD_SETTING);
@@ -1027,29 +1026,25 @@ void record_config_file(void)
   char current_system_echo = EEPROM.read(LOCATION_ECHO);
 
   //Determine current baud and copy it to string
-  if(current_system_baud == BAUD_2400) strcpy_P(settings_string, PSTR("2400"));
-  if(current_system_baud == BAUD_4800) strcpy_P(settings_string, PSTR("4800"));
-  if(current_system_baud == BAUD_9600) strcpy_P(settings_string, PSTR("9600"));
-  if(current_system_baud == BAUD_19200) strcpy_P(settings_string, PSTR("19200"));
-  if(current_system_baud == BAUD_38400) strcpy_P(settings_string, PSTR("38400"));
-  if(current_system_baud == BAUD_57600) strcpy_P(settings_string, PSTR("57600"));
-  if(current_system_baud == BAUD_115200) strcpy_P(settings_string, PSTR("115200"));
+  char baudRate[6];
+  if(current_system_baud == BAUD_2400) strcpy_P(baudRate, PSTR("2400"));
+  if(current_system_baud == BAUD_4800) strcpy_P(baudRate, PSTR("4800"));
+  if(current_system_baud == BAUD_9600) strcpy_P(baudRate, PSTR("9600"));
+  if(current_system_baud == BAUD_19200) strcpy_P(baudRate, PSTR("19200"));
+  if(current_system_baud == BAUD_38400) strcpy_P(baudRate, PSTR("38400"));
+  if(current_system_baud == BAUD_57600) strcpy_P(baudRate, PSTR("57600"));
+  if(current_system_baud == BAUD_115200) strcpy_P(baudRate, PSTR("115200"));
 
   //Convert system settings to visible ASCII characters
-  sprintf_P(temp, PSTR(",%d,%d,%d,%d,%d\0"), current_system_escape, current_system_max_escape, current_system_mode, current_system_verbose, current_system_echo);
-  strcat(settings_string, temp); //Add this string to the system string
-
-#if DEBUG
-  NewSerial.print(F("\nSetting string: "));
-  NewSerial.println(settings_string);
-#endif
-
+  sprintf_P(settings_string, PSTR("%s,%d,%d,%d,%d,%d\0"), baudRate, current_system_escape, current_system_max_escape, current_system_mode, current_system_verbose, current_system_echo);
   //Record current system settings to the config file
-  if(myFile.write((byte*)settings_string, strlen(settings_string)) != strlen(settings_string))
+  if(myFile.write(settings_string, strlen(settings_string)) != strlen(settings_string))
     NewSerial.println(F("error writing to file"));
 
   //Add a decoder line to the file
-  myFile.write(PSTR("\n\rbaud,escape,esc#,mode,verb,echo\0")); //Add this string to the file
+  char helperString[47]; //This probably should not be hard coded but we're doing it anyway!
+  sprintf_P(helperString, PSTR("\n\rbaud,escape,esc#,mode,verb,echo\0")); //This is the name of the config file. 'config.sys' is probably a bad idea.
+  myFile.write(helperString); //Add this string to the file
 
   myFile.sync(); //Sync all newly written data to card
   myFile.close(); //Close this file
