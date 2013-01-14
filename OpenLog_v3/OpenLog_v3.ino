@@ -457,7 +457,7 @@ void seqlog(void)
   SdFile seqFile;
 
   char sequentialFileName[strlen(SEQ_FILENAME)]; //Limited to 8.3
-  sprintf_P(sequentialFileName, PSTR(SEQ_FILENAME)); //This is the name of the config file. 'config.sys' is probably a bad idea.
+  strcpy_P(sequentialFileName, PSTR(SEQ_FILENAME)); //This is the name of the config file. 'config.sys' is probably a bad idea.
     
   //Try to create sequential file
   if (!seqFile.open(&currentDirectory, sequentialFileName, O_CREAT | O_WRITE))
@@ -500,23 +500,10 @@ byte append_file(char* file_name)
   byte localBuffer[LOCAL_BUFF_SIZE];
   byte checkedSpot;
 
-  uint16_t idleTime = 0;
   const uint16_t MAX_IDLE_TIME_MSEC = 500; //The number of milliseconds before unit goes to sleep
-
+  const uint16_t MAX_TIME_BEFORE_SYNC_MSEC = 5000;
+  uint32_t lastSyncTime = millis(); //Keeps track of the last time the file was synced
   byte escape_chars_received = 0;
-
-  //Ugly calculation to figure out how many times to loop before we need to force a record (file.sync())
-  uint32_t maxLoops = 450;
-  uint16_t timeSinceLastRecord = 0; //Sync the file every maxLoop # of bytes
-  if(setting_uart_speed == BAUD_2400) maxLoops = 2400; //Set bits per second
-  if(setting_uart_speed == BAUD_4800) maxLoops = 4800;
-  if(setting_uart_speed == BAUD_9600) maxLoops = 9600;
-  if(setting_uart_speed == BAUD_19200) maxLoops = 19200;
-  if(setting_uart_speed == BAUD_38400) maxLoops = 38400;
-  if(setting_uart_speed == BAUD_57600) maxLoops = 57600;
-  if(setting_uart_speed == BAUD_115200) maxLoops = 115200;
-  maxLoops /= 8; //Convert to bytes per second
-  maxLoops /= LOCAL_BUFF_SIZE; //Convert to # of loops per second
 
 #if DEBUG
   NewSerial.print(F("maxLoops: "));
@@ -529,9 +516,11 @@ byte append_file(char* file_name)
   while(escape_chars_received < setting_max_escape_character) {
 
     byte n = NewSerial.read(localBuffer, sizeof(localBuffer)); //Read characters from global buffer into the local buffer
-    if (n > 0) {
+i    if (n > 0) //If we have characters, check for escape characters
+    {
 
-      if (localBuffer[0] == setting_escape_character) {
+      if (localBuffer[0] == setting_escape_character) 
+      {
         escape_chars_received++;
 
         //Scan the local buffer for esacape characters
@@ -551,15 +540,17 @@ byte append_file(char* file_name)
 
       STAT1_PORT ^= (1<<STAT1); //Toggle the STAT1 LED each time we record the buffer
 
-      idleTime = 0; //We have characters so reset the idleTime
-
-      if(timeSinceLastRecord++ > maxLoops) { //This will force a sync approximately every second
-        timeSinceLastRecord = 0;
+      if((millis() - lastSyncTime) > MAX_TIME_BEFORE_SYNC_MSEC) //This will force a sync approximately every 5 seconds
+      { 
+        //This is here to make sure a log is recorded in the instance
+        //where the user is throwing non-stop data at the unit from power on to forever
         workingFile.sync(); //Sync the card
+        lastSyncTime = millis();
       }
 
     }
-    else if(idleTime > MAX_IDLE_TIME_MSEC) { //If we haven't received any characters in 2s, goto sleep
+    //No characters recevied?
+    else if( (millis() - lastSyncTime) > MAX_IDLE_TIME_MSEC) { //If we haven't received any characters in 2s, goto sleep
       workingFile.sync(); //Sync the card before we go to sleep
 
       STAT1_PORT &= ~(1<<STAT1); //Turn off stat LED to save power
@@ -572,11 +563,7 @@ byte append_file(char* file_name)
       power_timer0_enable();
 
       escape_chars_received = 0; // Clear the esc flag as it has timed out
-      idleTime = 0; //A received character woke us up to reset the idleTime
-    }
-    else {
-      idleTime++;
-      delay(1); //Burn 1ms waiting for new characters coming in
+      lastSyncTime = millis(); //Reset the last sync time to now
     }
 
   }
@@ -762,7 +749,7 @@ void read_config_file(void)
   if (!rootDirectory.openRoot(&volume)) systemError(ERROR_ROOT_INIT); // open the root directory
 
   char configFileName[strlen(CFG_FILENAME)]; //Limited to 8.3
-  sprintf_P(configFileName, PSTR(CFG_FILENAME)); //This is the name of the config file. 'config.sys' is probably a bad idea.
+  strcpy_P(configFileName, PSTR(CFG_FILENAME)); //This is the name of the config file. 'config.sys' is probably a bad idea.
 
   //Check to see if we have a config file
   if (!configFile.open(&rootDirectory, configFileName, O_READ)) {
@@ -992,7 +979,7 @@ void record_config_file(void)
   if (!rootDirectory.openRoot(&volume)) systemError(ERROR_ROOT_INIT); // open the root directory
 
   char configFileName[strlen(CFG_FILENAME)];
-  sprintf_P(configFileName, PSTR(CFG_FILENAME)); //This is the name of the config file. 'config.sys' is probably a bad idea.
+  strcpy_P(configFileName, PSTR(CFG_FILENAME)); //This is the name of the config file. 'config.sys' is probably a bad idea.
 
   //If there is currently a config file, trash it
   if (myFile.open(&rootDirectory, configFileName, O_WRITE)) {
@@ -1043,7 +1030,7 @@ void record_config_file(void)
 
   //Add a decoder line to the file
   char helperString[47]; //This probably should not be hard coded but we're doing it anyway!
-  sprintf_P(helperString, PSTR("\n\rbaud,escape,esc#,mode,verb,echo\0")); //This is the name of the config file. 'config.sys' is probably a bad idea.
+  strcpy_P(helperString, PSTR("\n\rbaud,escape,esc#,mode,verb,echo\0")); //This is the name of the config file. 'config.sys' is probably a bad idea.
   myFile.write(helperString); //Add this string to the file
 
   myFile.sync(); //Sync all newly written data to card
@@ -2108,7 +2095,7 @@ void system_menu(void)
       if (!rootDirectory.openRoot(&volume)) error("openRoot"); // open the root directory
 
       char configFileName[strlen(CFG_FILENAME)];
-      sprintf_P(configFileName, PSTR(CFG_FILENAME)); //This is the name of the config file. 'config.sys' is probably a bad idea.
+      strcpy_P(configFileName, PSTR(CFG_FILENAME)); //This is the name of the config file. 'config.sys' is probably a bad idea.
 
       //If there is currently a config file, trash it
       if (file.open(&rootDirectory, configFileName, O_WRITE)) {
