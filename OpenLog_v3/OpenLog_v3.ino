@@ -842,7 +842,7 @@ void read_config_file(void)
     else if(setting_number == 3) //System mode
     {
       new_system_mode = new_setting_int;
-      if(new_system_mode == 0 || new_system_mode > 5) new_system_mode = MODE_NEWLOG; //Default is NEWLOG
+      if(new_system_mode == 0 || new_system_mode > MODE_COMMAND) new_system_mode = MODE_NEWLOG; //Default is NEWLOG
     }
     else if(setting_number == 4) //Verbose setting
     {
@@ -1844,7 +1844,7 @@ byte gotoDir(char *dir)
 
 void print_menu(void)
 {
-  NewSerial.println(F("OpenLog v3.11"));
+  NewSerial.println(F("OpenLog v3.13"));
   NewSerial.println(F("Basic commands:"));
   NewSerial.println(F("new <file>\t\t: Creates <file>"));
   NewSerial.println(F("append <file>\t\t: Appends text to end of <file>.\r\n\t\t\t  The text is read from the UART in a stream and is not echoed. Finish by sending Ctrl+z (ASCII 26)"));
