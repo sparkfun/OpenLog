@@ -121,14 +121,14 @@
  v3.11 Added freeMemory support for RAM testing.
  
  This was taken from: http://arduino.cc/playground/Code/AvailableMemory
-
-
+ 
+ 
  v3.12 Using freeMemory() function from JeeLabs. Seems to be working well.
  
  Echo on/off is working again with a reduction of the buffer from 600 to 500.
  Code size is up a bit to 29,282. We have free RAM of about 527 after "2" and 444 once we've begun append_file.
  
-
+ 
  v3.13 Changed the string compares from strings in RAM (strcmp) to strings located in flash memory (strcmp_P).
  
  We used to use this type of compare: else if(strcmp_P(command_arg, PSTR("md")) == 0)
@@ -145,7 +145,7 @@
 #include <SerialPort.h> //This is a new/beta library written by Bill Greiman. You rock Bill!
 #include <EEPROM.h>
 
-SerialPort<0, 800, 0> NewSerial;
+SerialPort<0, 780, 0> NewSerial;
 //This is a very important buffer declaration. This sets the <port #, rx size, tx size>. We set
 //the TX buffer to zero because we will be spending most of our time needing to buffer the incoming (RX) characters.
 //900 works on minimal implementation, doesn't work with the full command prompt
@@ -377,7 +377,7 @@ char* newlog(void)
 {
   byte msb, lsb;
   uint16_t new_file_number;
-  
+
   SdFile newFile; //This will contain the file for SD writing
 
   //Combine two 8-bit EEPROM spots into one 16-bit number
@@ -458,7 +458,7 @@ void seqlog(void)
 
   char sequentialFileName[strlen(SEQ_FILENAME)]; //Limited to 8.3
   strcpy_P(sequentialFileName, PSTR(SEQ_FILENAME)); //This is the name of the config file. 'config.sys' is probably a bad idea.
-    
+
   //Try to create sequential file
   if (!seqFile.open(&currentDirectory, sequentialFileName, O_CREAT | O_WRITE))
   {
@@ -516,7 +516,7 @@ byte append_file(char* file_name)
   while(escape_chars_received < setting_max_escape_character) {
 
     byte n = NewSerial.read(localBuffer, sizeof(localBuffer)); //Read characters from global buffer into the local buffer
-i    if (n > 0) //If we have characters, check for escape characters
+    if (n > 0) //If we have characters, check for escape characters
     {
 
       if (localBuffer[0] == setting_escape_character) 
@@ -571,7 +571,7 @@ i    if (n > 0) //If we have characters, check for escape characters
   workingFile.sync();
   workingFile.close(); // Done recording, close out the file
 
-  digitalWrite(statled1, LOW); // Turn off indicator LED
+    digitalWrite(statled1, LOW); // Turn off indicator LED
 
   NewSerial.print(F("~")); // Indicate a successful record
 
@@ -1048,7 +1048,7 @@ void command_shell(void)
   //Provide a simple shell
   char buffer[30];
   byte tmp_var;
-  
+
   SdFile tempFile;
 
 #ifdef INCLUDE_SIMPLE_EMBEDDED
@@ -1231,10 +1231,31 @@ void command_shell(void)
       }
 
       //Argument 2: File wildcard removal
-      //ERROR
-      //      uint32_t filesDeleted = currentDirectory.remove(&wildcmp, get_cmd_arg(1), &removeErrorCallback);
-      NewSerial.println(F("Wildcard ls not yet supported"));
+      //Fixed by dlkeng - Thank you!
       uint32_t filesDeleted = 0;
+
+      char fname[13];
+
+      strupr(command_arg);
+
+      currentDirectory.seekSet(0);
+      while (tempFile.openNext(&currentDirectory, O_WRITE)) //Step through each object in the current directory
+      {
+        if (!tempFile.isDir() && !tempFile.isSubDir()) // Remove only files
+        {
+          if (tempFile.getFilename(fname)) // Get the filename of the object we're looking at
+          {
+            if (wildcmp(command_arg, fname))  // See if it matches the wildcard
+            {
+              if (tempFile.remove()) // Remove this file
+              {
+                ++filesDeleted;
+              }
+            }
+          }
+        }
+        tempFile.close();
+      }
 
       if ((feedback_mode & EXTENDED_INFO) > 0)
       {
@@ -2270,3 +2291,4 @@ byte wildcmp(const char* wild, const char* string)
 
 //End wildcard functions
 //=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+
