@@ -1847,27 +1847,25 @@ void print_menu(void)
   NewSerial.println(F("OpenLog v3.13"));
   NewSerial.println(F("Basic commands:"));
   NewSerial.println(F("new <file>\t\t: Creates <file>"));
-  NewSerial.println(F("append <file>\t\t: Appends text to end of <file>.\r\n\t\t\t  The text is read from the UART in a stream and is not echoed. Finish by sending Ctrl+z (ASCII 26)"));
+  NewSerial.println(F("append <file>\t\t: Appends text to end of <file>"));
 
-  /*NewSerial.println(F("write <file> <offset>\t: Writes text to <file>, starting from <offset>. The text is read from the UART, line by line. Finish with an empty line"));
-   NewSerial.println(F("rm <file>\t\t: Deletes <file>. Use wildcard to do a wildcard removal of files"));*/
+  //NewSerial.println(F("write <file> <offset>\t: Writes text to <file>, starting from <offset>. The text is read from the UART, line by line. Finish with an empty line"));
+  //NewSerial.println(F("rm <file>\t\t: Deletes <file>. Use wildcard to do a wildcard removal of files"));
 
-  NewSerial.println(F("md <directory>\t\t: Creates a directory called <directory>"));
+  NewSerial.println(F("md <directory>\t\t: Creates a <directory>"));
 
-  /*NewSerial.println(F("cd <directory>\t\t: Changes current working directory to <directory>"));
-   NewSerial.println(F("cd ..\t\t: Changes to lower directory in tree"));*/
+  //NewSerial.println(F("cd <directory>\t\t: Changes current working directory to <directory>"));
+  //NewSerial.println(F("cd ..\t\t: Changes to lower directory in tree"));
 
-  NewSerial.println(F("ls\t\t\t: Shows the content of the current directory.\r\n\t\t\t  Use wildcard to do a wildcard listing of files in current directory"));
-  NewSerial.println(F("read <file> <start> <length> <type>\r\n\t\t\t: Writes ASCII <length> parts of <file> to the terminal starting at <start>. \r\n\t\t\t  Omit <start> and <length> to read whole file. <type> 1 prints in ASCII, 2 in HEX."));
+  NewSerial.println(F("ls\t\t\t: Shows the content of the current directory. Wildcards supported."));
+  NewSerial.println(F("read <file> <start> <length> <type>\r\n\t\t\t: Outputs <length> bytes of <file> to the terminal starting at <start>. Omit <start> and <length> to read whole file. <type> 1 prints in ASCII, 2 in HEX."));
   NewSerial.println(F("size <file>\t\t: Write size of file to terminal"));
-  NewSerial.println(F("disk\t\t\t: Shows card manufacturer, status, filesystem capacity and free storage space"));
+  NewSerial.println(F("disk\t\t\t: Shows card information"));
 
-  /*NewSerial.println(F("init\t\t\t: Reinitializes and reopens the memory card"));
-   NewSerial.println(F("sync\t\t\t: Ensures all buffered data is written to the card"));*/
+  //NewSerial.println(F("init\t\t\t: Reinitializes and reopens the memory card"));
+  //NewSerial.println(F("sync\t\t\t: Ensures all buffered data is written to the card"));
 
-  NewSerial.println(F("reset\t\t\t: Causes unit to reset and using any new parameters in config file"));
-
-  NewSerial.println(F("\n\rMenus:"));
+  NewSerial.println(F("reset\t\t\t: Causes unit to reset, uses parameters in config file"));
   NewSerial.println(F("set\t\t\t: Menu to configure system mode"));
   NewSerial.println(F("baud\t\t\t: Menu to configure baud rate"));
 }
