@@ -1857,9 +1857,9 @@ void print_menu(void)
   //NewSerial.println(F("cd <directory>\t\t: Changes current working directory to <directory>"));
   //NewSerial.println(F("cd ..\t\t: Changes to lower directory in tree"));
 
-  NewSerial.println(F("ls\t\t\t: Shows the content of the current directory. Wildcards supported."));
-  NewSerial.println(F("read <file> <start> <length> <type>\r\n\t\t\t: Outputs <length> bytes of <file> to the terminal starting at <start>. Omit <start> and <length> to read whole file. <type> 1 prints in ASCII, 2 in HEX."));
-  NewSerial.println(F("size <file>\t\t: Write size of file to terminal"));
+  NewSerial.println(F("ls\t\t\t: Shows the content of the current directory.."));
+  NewSerial.println(F("read <file> <start> <length> <type>: Outputs <length> bytes of <file> to the terminal starting at <start>. Omit <start> and <length> to read whole file. <type> 1 prints in ASCII, 2 in HEX."));
+  NewSerial.println(F("size <file>\t\t: Write size of <file> to terminal"));
   NewSerial.println(F("disk\t\t\t: Shows card information"));
 
   //NewSerial.println(F("init\t\t\t: Reinitializes and reopens the memory card"));
