@@ -496,19 +496,14 @@ byte append_file(char* file_name)
   NewSerial.print(F("<")); //give a different prompt to indicate no echoing
   digitalWrite(statled1, HIGH); //Turn on indicator LED
 
-#define LOCAL_BUFF_SIZE  32
+  const byte LOCAL_BUFF_SIZE = 32; //This is the 2nd buffer. It pulls from the larger NewSerial buffer as quickly as possible.
   byte localBuffer[LOCAL_BUFF_SIZE];
   byte checkedSpot;
+  byte escape_chars_received = 0;
 
   const uint16_t MAX_IDLE_TIME_MSEC = 500; //The number of milliseconds before unit goes to sleep
   const uint16_t MAX_TIME_BEFORE_SYNC_MSEC = 5000;
   uint32_t lastSyncTime = millis(); //Keeps track of the last time the file was synced
-  byte escape_chars_received = 0;
-
-#if DEBUG
-  NewSerial.print(F("maxLoops: "));
-  NewSerial.println(maxLoops);
-#endif
 
   printRam(); //Print the available RAM
 
@@ -535,6 +530,8 @@ byte append_file(char* file_name)
             escape_chars_received = 0; 
         }
       }
+      else
+        escape_chars_received = 0;
 
       workingFile.write(localBuffer, n); //Record the buffer to the card
 
