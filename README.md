@@ -23,6 +23,7 @@ Repository Contents
 
 * **/hardware** - Hardware design files for the OpenLog PCB. These files were designed in Eagle CAD.
 * **/firmware** 
+
 ** OpenLog_v3 - Firmware that ships with OpenLog
 ** OpenLog_v3_Light - Alternative version to allow for larger buffers
 ** Examples - Example Arduino code for controlling and testing OpenLog
