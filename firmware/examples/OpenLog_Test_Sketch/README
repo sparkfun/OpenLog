@@ -1,0 +1,2 @@
+This is a simple test sketch for OpenLog. It sends a large batch of characters to the serial port at 9600bps. 
+Original test was recomended by ScottH on issue #12 : http://github.com/nseidle/OpenLog/issues#issue/12
