@@ -18,7 +18,7 @@
  OpenLog automatically works with 512MB, 1GB, 2GB, 4GB, 8GB, and 16GB microSD cards. We recommend FAT16 for 2GB and smaller cards. We
  recommend FAT32 for 4GB and larger cards.
  	
- OpenLog runs at 9600bps by default. This is configurable to 2400, 4800, 9600, 19200, 38400, 57600, and 115200bps. You can alter 
+ OpenLog runs at 9600bps by default. This is configurable to 1200, 2400, 4800, 9600, 19200, 38400, 57600, and 115200bps. You can alter 
  all settings including baud rate and escape characters by editing config.txt found on OpenLog.
  
  Type '?' to get a list of supported commands.
@@ -139,6 +139,12 @@
  RAM is currently at 779 after 2 and 696 once we've begun append_file.
  Removal of strncmp(). I believe we used it to reduce flash footprint. Once migrated to PSTR, it makes it worse.
  
+ 29172 bytes
+
+ v3.14 Added support for 1200bps Issue 139
+ 
+ 29354 bytes
+ 
  */
 
 #include <SdFat.h> //We do not use the built-in SD.h file because it calls Serial.print
@@ -199,6 +205,7 @@ char folderTree[FOLDER_TRACK_DEPTH][12];
 #define BAUD_4800	4
 #define BAUD_19200	5
 #define BAUD_38400	6
+#define BAUD_1200	7
 
 #define MODE_NEWLOG	0
 #define MODE_SEQLOG     1
@@ -328,6 +335,7 @@ void setup(void)
   read_system_settings(); //Load all system settings from EEPROM
 
   //Setup UART
+  if(setting_uart_speed == BAUD_1200) NewSerial.begin(1200);
   if(setting_uart_speed == BAUD_2400) NewSerial.begin(2400);
   if(setting_uart_speed == BAUD_4800) NewSerial.begin(4800);
   if(setting_uart_speed == BAUD_9600) NewSerial.begin(9600);
@@ -817,7 +825,8 @@ void read_config_file(void)
 
     if(setting_number == 0) //Baud rate
     {
-      if(strcmp_P(new_setting, PSTR("2400")) == 0) new_system_baud = BAUD_2400;
+      if(strcmp_P(new_setting, PSTR("1200")) == 0) new_system_baud = BAUD_1200;
+      else if(strcmp_P(new_setting, PSTR("2400")) == 0) new_system_baud = BAUD_2400;
       else if(strcmp_P(new_setting, PSTR("4800")) == 0) new_system_baud = BAUD_4800;
       else if(strcmp_P(new_setting, PSTR("9600")) == 0) new_system_baud = BAUD_9600;
       else if(strcmp_P(new_setting, PSTR("19200")) == 0) new_system_baud = BAUD_19200;
@@ -865,6 +874,7 @@ void read_config_file(void)
   char temp_string[CFG_LENGTH]; //"115200,103,14,0,1,1\0" = 115200 bps, escape char of ASCII(103), 14 times, new log mode, verbose on, echo on.
   char temp[CFG_LENGTH];
 
+  if(new_system_baud == BAUD_1200) strcpy_P(temp_string, PSTR("1200"));
   if(new_system_baud == BAUD_2400) strcpy_P(temp_string, PSTR("2400"));
   if(new_system_baud == BAUD_4800) strcpy_P(temp_string, PSTR("4800"));
   if(new_system_baud == BAUD_9600) strcpy_P(temp_string, PSTR("9600"));
@@ -890,6 +900,7 @@ void read_config_file(void)
     setting_uart_speed = new_system_baud;
 
     //Move system to new uart speed
+    if(setting_uart_speed == BAUD_1200) NewSerial.begin(1200);
     if(setting_uart_speed == BAUD_2400) NewSerial.begin(2400);
     if(setting_uart_speed == BAUD_4800) NewSerial.begin(4800);
     if(setting_uart_speed == BAUD_9600) NewSerial.begin(9600);
@@ -977,7 +988,7 @@ void record_config_file(void)
 
   char configFileName[strlen(CFG_FILENAME)];
   strcpy_P(configFileName, PSTR(CFG_FILENAME)); //This is the name of the config file. 'config.sys' is probably a bad idea.
-
+  
   //If there is currently a config file, trash it
   if (myFile.open(&rootDirectory, configFileName, O_WRITE)) {
     if (!myFile.remove()){
@@ -1011,6 +1022,7 @@ void record_config_file(void)
 
   //Determine current baud and copy it to string
   char baudRate[6];
+  if(current_system_baud == BAUD_1200) strcpy_P(baudRate, PSTR("1200"));
   if(current_system_baud == BAUD_2400) strcpy_P(baudRate, PSTR("2400"));
   if(current_system_baud == BAUD_4800) strcpy_P(baudRate, PSTR("4800"));
   if(current_system_baud == BAUD_9600) strcpy_P(baudRate, PSTR("9600"));
@@ -1841,7 +1853,7 @@ byte gotoDir(char *dir)
 
 void print_menu(void)
 {
-  NewSerial.println(F("OpenLog v3.13"));
+  NewSerial.println(F("OpenLog v3.14"));
   NewSerial.println(F("Basic commands:"));
   NewSerial.println(F("new <file>\t\t: Creates <file>"));
   NewSerial.println(F("append <file>\t\t: Appends text to end of <file>"));
@@ -1877,8 +1889,9 @@ void baud_menu(void)
     NewSerial.println(F("\n\rBaud Configuration:"));
 
     NewSerial.print(F("Current: "));
-    if(uart_speed == BAUD_4800) NewSerial.print(F("48"));
+    if(uart_speed == BAUD_1200) NewSerial.print(F("12"));
     if(uart_speed == BAUD_2400) NewSerial.print(F("24"));
+    if(uart_speed == BAUD_4800) NewSerial.print(F("48"));
     if(uart_speed == BAUD_9600) NewSerial.print(F("96"));
     if(uart_speed == BAUD_19200) NewSerial.print(F("192"));
     if(uart_speed == BAUD_38400) NewSerial.print(F("384"));
@@ -1887,13 +1900,14 @@ void baud_menu(void)
     NewSerial.println(F("00 bps"));
 
     NewSerial.println(F("Change to:"));
-    NewSerial.println(F("1) 2400 bps"));
-    NewSerial.println(F("2) 4800 bps"));
-    NewSerial.println(F("3) 9600 bps"));
-    NewSerial.println(F("4) 19200 bps"));
-    NewSerial.println(F("5) 38400 bps"));
-    NewSerial.println(F("6) 57600 bps"));
-    NewSerial.println(F("7) 115200 bps"));
+    NewSerial.println(F("1) 1200 bps"));
+    NewSerial.println(F("2) 2400 bps"));
+    NewSerial.println(F("3) 4800 bps"));
+    NewSerial.println(F("4) 9600 bps"));
+    NewSerial.println(F("5) 19200 bps"));
+    NewSerial.println(F("6) 38400 bps"));
+    NewSerial.println(F("7) 57600 bps"));
+    NewSerial.println(F("8) 115200 bps"));
     NewSerial.println(F("x) Exit"));
 
     //Print prompt
@@ -1906,6 +1920,16 @@ void baud_menu(void)
     //Execute command
     if(command == '1')
     {
+      NewSerial.println(F("Going to 1200bps"));
+
+      //Set baud rate to 1200
+      EEPROM.write(LOCATION_BAUD_SETTING, BAUD_1200);
+      record_config_file(); //Put this new setting into the config file
+      blink_error(ERROR_NEW_BAUD);
+      return;
+    }
+    if(command == '2')
+    {
       NewSerial.println(F("Going to 2400bps"));
 
       //Set baud rate to 2400
@@ -1914,7 +1938,7 @@ void baud_menu(void)
       blink_error(ERROR_NEW_BAUD);
       return;
     }
-    if(command == '2')
+    if(command == '3')
     {
       NewSerial.println(F("Going to 4800bps"));
 
@@ -1924,7 +1948,7 @@ void baud_menu(void)
       blink_error(ERROR_NEW_BAUD);
       return;
     }
-    if(command == '3')
+    if(command == '4')
     {
       NewSerial.println(F("Going to 9600bps"));
 
@@ -1934,7 +1958,7 @@ void baud_menu(void)
       blink_error(ERROR_NEW_BAUD);
       return;
     }
-    if(command == '4')
+    if(command == '5')
     {
       NewSerial.println(F("Going to 19200bps"));
 
@@ -1944,7 +1968,7 @@ void baud_menu(void)
       blink_error(ERROR_NEW_BAUD);
       return;
     }
-    if(command == '5')
+    if(command == '6')
     {
       NewSerial.println(F("Going to 38400bps"));
 
@@ -1954,7 +1978,7 @@ void baud_menu(void)
       blink_error(ERROR_NEW_BAUD);
       return;
     }
-    if(command == '6')
+    if(command == '7')
     {
       NewSerial.println(F("Going to 57600bps"));
 
@@ -1964,7 +1988,7 @@ void baud_menu(void)
       blink_error(ERROR_NEW_BAUD);
       return;
     }
-    if(command == '7')
+    if(command == '8')
     {
       NewSerial.println(F("Going to 115200bps"));
 
