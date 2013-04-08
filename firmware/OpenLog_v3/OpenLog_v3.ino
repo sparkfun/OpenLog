@@ -187,7 +187,8 @@ void(* Reset_AVR) (void) = 0; //Dirty way of resetting the ATmega, but it works 
 char folderTree[FOLDER_TRACK_DEPTH][12];
 
 #define CFG_FILENAME "config.txt" //This is the name of the file that contains the unit settings
-#define CFG_LENGTH  20 //Length of text found in config file: "115200,103,14,0,1,1\0" = 115200 bps, escape char of ASCII(103), 14 times, new log mode, verbose on, echo on. 
+#define CFG_LENGTH  22 //Length of text found in config file: 
+//"115200,103,14,0,1,1,0\0" = 115200 bps, escape char of ASCII(103), 14 times, new log mode, verbose on, echo on, ignore RX false. 
 #define SEQ_FILENAME "SEQLOG00.TXT" //This is the name for the file when you're in sequential mode
 
 //Internal EEPROM locations for the user settings
@@ -201,6 +202,7 @@ char folderTree[FOLDER_TRACK_DEPTH][12];
 #define LOCATION_BAUD_SETTING_HIGH	0x09
 #define LOCATION_BAUD_SETTING_MID	0x0A
 #define LOCATION_BAUD_SETTING_LOW	0x0B
+#define LOCATION_IGNORE_RX		0x0C
 
 #define BAUD_MIN  300
 #define BAUD_MAX  1000000
@@ -251,6 +253,7 @@ byte setting_escape_character; //This is the ASCII character we look for to brea
 byte setting_max_escape_character; //Number of escape chars before break logging, default is 3
 byte setting_verbose; //This controls the whether we get extended or simple responses.
 byte setting_echo; //This turns on/off echoing at the command prompt
+byte setting_ignore_RX; //This flag, when set to 1 will make OpenLog ignore the state of the RX pin when powering up
 
 //The number of command line arguments
 //Increase to support more arguments but be aware of the memory restrictions
@@ -328,9 +331,10 @@ void setup(void)
   power_timer2_disable();
   power_adc_disable();
 
-  check_emergency_reset(); //Look to see if the RX pin is being pulled low
-
   read_system_settings(); //Load all system settings from EEPROM
+
+  if(setting_ignore_RX == OFF) //If we are NOT ignoring RX, then
+    check_emergency_reset(); //Look to see if the RX pin is being pulled low
 
   //Setup UART
   NewSerial.begin(setting_uart_speed);
@@ -664,6 +668,9 @@ void set_default_settings(void)
   //Reset echo to on
   EEPROM.write(LOCATION_ECHO, ON);
 
+  //Reset the ignore RX to 'Pay attention to RX!'
+  EEPROM.write(LOCATION_IGNORE_RX, OFF);
+
   //These settings are not recorded to the config file
   //We can't do it here because we are not sure the FAT system is init'd
 }
@@ -736,6 +743,16 @@ void read_system_settings(void)
     feedback_mode |= ECHO;
   else
     feedback_mode &= ((byte)~ECHO);
+
+  //Read whether we should ignore RX at power up
+  //Some users need OpenLog to ignore the RX pin during power up
+  //Default is false or ignore
+  setting_ignore_RX = EEPROM.read(LOCATION_IGNORE_RX);
+  if(setting_ignore_RX > 1) 
+  {
+    setting_ignore_RX = OFF; //By default we DO NOT ignore RX
+    EEPROM.write(LOCATION_IGNORE_RX, setting_ignore_RX);
+  }
 }
 
 void read_config_file(void)
@@ -766,10 +783,10 @@ void read_config_file(void)
   NewSerial.println(F("Found config file!"));
 #endif
 
-  //Read up to 20 characters from the file. There may be a better way of doing this...
+  //Read up to 22 characters from the file. There may be a better way of doing this...
   char c;
   int len;
-  byte settings_string[CFG_LENGTH]; //"115200,103,14,0,1,1\0" = 115200 bps, escape char of ASCII(103), 14 times, new log mode, verbose on, echo on.
+  byte settings_string[CFG_LENGTH]; //"115200,103,14,0,1,1,0\0" = 115200 bps, escape char of ASCII(103), 14 times, new log mode, verbose on, echo on, ignore RX false.
   for(len = 0 ; len < CFG_LENGTH ; len++) {
     if( (c = configFile.read()) < 0) break; //We've reached the end of the file
     if(c == '\0') break; //Bail if we hit the end of this string
@@ -790,11 +807,12 @@ void read_config_file(void)
 
   //Default the system settings in case things go horribly wrong
   long new_system_baud = 9600;
-  char new_system_mode = MODE_NEWLOG;
-  char new_system_escape = 26;
-  char new_system_max_escape = 3;
-  char new_system_verbose = ON;
-  char new_system_echo = ON;
+  byte new_system_mode = MODE_NEWLOG;
+  byte new_system_escape = 26;
+  byte new_system_max_escape = 3;
+  byte new_system_verbose = ON;
+  byte new_system_echo = ON;
+  byte new_system_ignore_RX = OFF;  
 
   //Parse the settings out
   byte i = 0, j = 0, setting_number = 0;
@@ -845,6 +863,11 @@ void read_config_file(void)
     {
       new_system_echo = new_setting_int;
       if(new_system_echo != ON && new_system_echo != OFF) new_system_echo = ON; //Default is on
+    }
+    else if(setting_number == 6) //Ignore RX setting
+    {
+      new_system_ignore_RX = new_setting_int;
+      if(new_system_ignore_RX != ON && new_system_ignore_RX != OFF) new_system_ignore_RX = OFF; //Default is to listen to RX
     }
     else
       //We're done! Stop looking for settings
@@ -908,6 +931,14 @@ void read_config_file(void)
     recordNewSettings = true;
   }
 
+  if(new_system_ignore_RX != setting_ignore_RX) {
+    //Goto new ignore setting
+    setting_ignore_RX = new_system_ignore_RX;
+    EEPROM.write(LOCATION_IGNORE_RX, setting_ignore_RX);
+
+    recordNewSettings = true;
+  }
+
   //We don't want to constantly record a new config file on each power on. Only record when there is a change.
   if(recordNewSettings == true)
     record_config_file(); //If we corrected some values because the config file was corrupt, then overwrite any corruption
@@ -966,18 +997,19 @@ void record_config_file(void)
   }
   //Config was successfully created, now record current system settings to the config file
 
-  char settings_string[CFG_LENGTH]; //"115200,103,14,0,1,1\0" = 115200 bps, escape char of ASCII(103), 14 times, new log mode, verbose on, echo on.
+  char settings_string[CFG_LENGTH]; //"115200,103,14,0,1,1,0\0" = 115200 bps, escape char of ASCII(103), 14 times, new log mode, verbose on, echo on, ignore RX false.
 
   //Before we read the EEPROM values, they've already been tested and defaulted in the read_system_settings function
   long current_system_baud = readBaud();
-  char current_system_escape = EEPROM.read(LOCATION_ESCAPE_CHAR);
-  char current_system_max_escape = EEPROM.read(LOCATION_MAX_ESCAPE_CHAR);
-  char current_system_mode = EEPROM.read(LOCATION_SYSTEM_SETTING);
-  char current_system_verbose = EEPROM.read(LOCATION_VERBOSE);
-  char current_system_echo = EEPROM.read(LOCATION_ECHO);
+  byte current_system_escape = EEPROM.read(LOCATION_ESCAPE_CHAR);
+  byte current_system_max_escape = EEPROM.read(LOCATION_MAX_ESCAPE_CHAR);
+  byte current_system_mode = EEPROM.read(LOCATION_SYSTEM_SETTING);
+  byte current_system_verbose = EEPROM.read(LOCATION_VERBOSE);
+  byte current_system_echo = EEPROM.read(LOCATION_ECHO);
+  byte current_system_ignore_RX = EEPROM.read(LOCATION_IGNORE_RX);
 
   //Convert system settings to visible ASCII characters
-  sprintf_P(settings_string, PSTR("%ld,%d,%d,%d,%d,%d\0"), current_system_baud, current_system_escape, current_system_max_escape, current_system_mode, current_system_verbose, current_system_echo);
+  sprintf_P(settings_string, PSTR("%ld,%d,%d,%d,%d,%d,%d\0"), current_system_baud, current_system_escape, current_system_max_escape, current_system_mode, current_system_verbose, current_system_echo, current_system_ignore_RX);
   
   //Record current system settings to the config file
   if(myFile.write(settings_string, strlen(settings_string)) != strlen(settings_string))
@@ -985,7 +1017,7 @@ void record_config_file(void)
 
   //Add a decoder line to the file
   char helperString[35]; //This probably should not be hard coded but we're doing it anyway!
-  strcpy_P(helperString, PSTR("\n\r baud,escape,esc#,mode,verb,echo\0"));
+  strcpy_P(helperString, PSTR("\n\r baud,escape,esc#,mode,verb,echo,ignoreRX\0"));
   myFile.write(helperString); //Add this string to the file
 
   myFile.sync(); //Sync all newly written data to card
@@ -1820,7 +1852,7 @@ byte gotoDir(char *dir)
 
 void print_menu(void)
 {
-  NewSerial.println(F("OpenLog v3.14"));
+  NewSerial.println(F("OpenLog v3.20"));
   NewSerial.println(F("Basic commands:"));
   NewSerial.println(F("new <file>\t\t: Creates <file>"));
   NewSerial.println(F("append <file>\t\t: Appends text to end of <file>"));
