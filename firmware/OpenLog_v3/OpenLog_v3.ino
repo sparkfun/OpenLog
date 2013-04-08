@@ -149,6 +149,8 @@
  
  28,640 bytes (yay! saved a bunch by removing the text-based menu system)
  
+ Added support for newlines when using the 'write' command.
+ Should fix issue #149.
  */
 
 #include <SdFat.h> //We do not use the built-in SD.h file because it calls Serial.print
@@ -1252,15 +1254,17 @@ void command_shell(void)
 
       strupr(command_arg);
 
-      currentDirectory.seekSet(0);
-      while (tempFile.openNext(&currentDirectory, O_WRITE)) //Step through each object in the current directory
-      {
+      currentDirectory.rewind();
+      while (tempFile.openNext(&currentDirectory, O_READ)) //Step through each object in the current directory      {
         if (!tempFile.isDir() && !tempFile.isSubDir()) // Remove only files
         {
           if (tempFile.getFilename(fname)) // Get the filename of the object we're looking at
           {
             if (wildcmp(command_arg, fname))  // See if it matches the wildcard
             {
+              tempFile.close();
+              tempFile.open(&currentDirectory, fname, O_WRITE);  // Re-open for WRITE to be deleted
+
               if (tempFile.remove()) // Remove this file
               {
                 ++filesDeleted;
