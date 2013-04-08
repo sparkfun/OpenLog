@@ -89,8 +89,8 @@
  Replumbed everything to get away from hardware UART
  Reduced # of sub directory support from 15 levels to 2 to allow for more RAM
  
- Wildcard remove is not yet supported in v3.0
- Wildcard ls is not yet supported in v3.0
+ Wildcard remove is supported in v3.1
+ Wildcard is supported in v3.2
  efcount and efinfo is not yet supported in v3.0
  
  Testing at 115200. First test with clean/empty card. The second test is with 193MB across 172 files on the microSD card.
@@ -152,7 +152,9 @@
  Added support for newlines when using the 'write' command.
  Should fix issue #149.
  
- Fixed issue #135: When removing files and there is a directory, all wildcard files are now removed correctly.
+ Fixed issue #134: When removing files and there is a directory, all wildcard files are now removed correctly.
+ Fixed issue #135: ls with wildcard works again. Thank you dlkeng!
+ 
  */
 
 #include <SdFat.h> //We do not use the built-in SD.h file because it calls Serial.print
