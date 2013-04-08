@@ -140,7 +140,7 @@
  Removal of strncmp(). I believe we used it to reduce flash footprint. Once migrated to PSTR, it makes it worse.
  
  29172 bytes
-
+ 
  v3.14 Added support for 1200bps Issue 139
  
  29354 bytes
@@ -151,6 +151,8 @@
  
  Added support for newlines when using the 'write' command.
  Should fix issue #149.
+ 
+ Fixed issue #135: When removing files and there is a directory, all wildcard files are now removed correctly.
  */
 
 #include <SdFat.h> //We do not use the built-in SD.h file because it calls Serial.print
@@ -658,7 +660,7 @@ void set_default_settings(void)
 {
   //Reset UART to 9600bps
   writeBaud(9600);
-  
+
   //Reset system to new log mode
   EEPROM.write(LOCATION_SYSTEM_SETTING, MODE_NEWLOG);
 
@@ -889,12 +891,12 @@ void read_config_file(void)
     //If the baud rate from the file is different from the current setting,
     //Then update the setting to the file setting
     //And re-init the UART
-    
+
     writeBaud(new_system_baud); //Write this baudrate to EEPROM
     setting_uart_speed = new_system_baud;
     NewSerial.begin(setting_uart_speed); //Move system to new uart speed
 
-    recordNewSettings = true;
+      recordNewSettings = true;
   }
 
   if(new_system_mode != setting_system_mode) {
@@ -981,7 +983,7 @@ void record_config_file(void)
 
   char configFileName[strlen(CFG_FILENAME)];
   strcpy_P(configFileName, PSTR(CFG_FILENAME)); //This is the name of the config file. 'config.sys' is probably a bad idea.
-  
+
   //If there is currently a config file, trash it
   if (myFile.open(&rootDirectory, configFileName, O_WRITE)) {
     if (!myFile.remove()){
@@ -1016,11 +1018,11 @@ void record_config_file(void)
 
   //Convert system settings to visible ASCII characters
   sprintf_P(settings_string, PSTR("%ld,%d,%d,%d,%d,%d,%d\0"), current_system_baud, current_system_escape, current_system_max_escape, current_system_mode, current_system_verbose, current_system_echo, current_system_ignore_RX);
-  
+
   //Record current system settings to the config file
   if(myFile.write(settings_string, strlen(settings_string)) != strlen(settings_string))
     NewSerial.println(F("error writing to file"));
-  
+
   myFile.println(); //Add a break between lines
 
   //Add a decoder line to the file
@@ -1048,9 +1050,9 @@ long readBaud(void)
   byte uartSpeedHigh = EEPROM.read(LOCATION_BAUD_SETTING_HIGH);
   byte uartSpeedMid = EEPROM.read(LOCATION_BAUD_SETTING_MID);
   byte uartSpeedLow = EEPROM.read(LOCATION_BAUD_SETTING_LOW);
-  
+
   long uartSpeed = 0x00FF0000 & ((long)uartSpeedHigh << 16) | ((long)uartSpeedMid << 8) | uartSpeedLow; //Combine the three bytes
-  
+
   return(uartSpeed); 
 }
 
@@ -1168,10 +1170,20 @@ void command_shell(void)
         NewSerial.println(volume.fatType(), DEC);
       }
 
-      //ERROR
-      //      currentDirectory.ls(LS_SIZE, 0, &wildcmp, get_cmd_arg(1));
-      currentDirectory.ls(LS_SIZE | LS_R);
-      NewSerial.println(F("Wild card ls not yet supported"));
+      if (count_cmd_args() == 1)  // has no arguments
+      {
+        // Don't use the 'ls()' method in the SdFat library as it does not
+        // limit recursion into subdirectories.
+        command_arg[0] = '*';       // use global wildcard
+        command_arg[1] = '\0';
+      }
+      else      // has argument (and possible wildcards)
+      {
+        command_arg = get_cmd_arg(1);
+        strupr(command_arg);
+      }
+      // display listing with limited recursion into subdirectories
+      lsPrint(&currentDirectory, command_arg, LS_SIZE | LS_R, 0);
 
 #ifdef INCLUDE_SIMPLE_EMBEDDED
       command_succedded = 1;
@@ -1255,7 +1267,8 @@ void command_shell(void)
       strupr(command_arg);
 
       currentDirectory.rewind();
-      while (tempFile.openNext(&currentDirectory, O_READ)) //Step through each object in the current directory      {
+      while (tempFile.openNext(&currentDirectory, O_READ)) //Step through each object in the current directory
+      {
         if (!tempFile.isDir() && !tempFile.isSubDir()) // Remove only files
         {
           if (tempFile.getFilename(fname)) // Get the filename of the object we're looking at
@@ -1436,7 +1449,7 @@ void command_shell(void)
             NewSerial.print(F("error writing to file\n\r"));
           break;
         }
-        
+
         if(dataLen < (sizeof(buffer) - 1)) tempFile.write("\n\r", 2); //If we didn't fill up the buffer then user must have sent NL. Append new line and return
       }
 
@@ -1907,15 +1920,15 @@ void baud_menu(void)
   //Read user input
   char newBaud[8]; //Max at 1000000
   read_line(newBaud, sizeof(newBaud));
-  
+
   if(newBaud[0] == 'x')
   {
     NewSerial.println(F("Exiting"));
     return; //Look for escape character
   }
-  
+
   long newRate = strtolong(newBaud); //Convert this string to a long
-  
+
   if(newRate < BAUD_MIN || newRate > BAUD_MAX)
   {
     NewSerial.println(F("Out of bounds"));
@@ -1925,7 +1938,7 @@ void baud_menu(void)
     NewSerial.print(F("Going to "));
     NewSerial.print(newRate);
     NewSerial.println(F("bps"));
-  
+
     //Record this new baud rate
     writeBaud(newRate);
     record_config_file(); //Put this new setting into the config file
@@ -2237,4 +2250,166 @@ byte wildcmp(const char* wild, const char* string)
 
 //End wildcard functions
 //=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+
+//------------------------------------------------------------------------------
+// Listing functions
+//  - Modeled loosely on the ls() methods in SdBaseFile.cpp from the SdFat library.
+// Written by dlkeng in relation to issue 135 https://github.com/sparkfun/OpenLog/issues/135
+
+#define WAS_EOF             0
+#define WAS_FILE            1
+#define WAS_SUBDIR          2
+#define FILENAME_EXT_SIZE   13
+#define LS_FIELD_SIZE       (FILENAME_EXT_SIZE + 1)
+#define SUBDIR_INDENT       2
+#define DIR_SIZE            (sizeof(dir_t))
+
+/*
+ * NAME:
+ *  void lsPrint(SdFile * theDir, char * cmdStr, byte flags, byte indent)
+ *
+ * PARAMETERS:
+ *  SdFile * theDir = the directory to list (assumed opened)
+ *  char * cmdStr = the command line file/directory string (with possible wildcards)
+ *  byte flags = the inclusive OR of
+ *                  LS_SIZE - print the file size
+ *                  LS_R - recursively list subdirectories
+ *  byte indent = amount of space before file name
+ *                (used for recursive list to indicate subdirectory level)
+ *
+ * WHAT:
+ *  List directory contents to serial port.
+ *
+ *  Wildcard support rules:
+ *    Wildcard characters ('*', '?') only apply to the selection of filenames to
+ *    list, not to the listing of directory or subdirectory names. All directory
+ *    and subdirectory names are always listed.
+ *
+ * RETURN VALUES:
+ *  None.
+ *
+ * SPECIAL CONSIDERATIONS:
+ *  May be called recursively with limited recursion depth (see FOLDER_TRACK_DEPTH).
+ *  Each recursion uses ~50 bytes of RAM.
+ */
+void lsPrint(SdFile * theDir, char * cmdStr, byte flags, byte indent)
+{
+  static byte depth = 0;      // current recursion depth
+  byte status;
+  uint16_t index;
+  SdFile subdir;
+
+  theDir->rewind();
+  while ((status = lsPrintNext(theDir, cmdStr, flags, indent)))
+  {
+    if ((status == WAS_SUBDIR) && (flags & LS_R) && (depth < FOLDER_TRACK_DEPTH))
+    {
+      // was a subdirectory, recursion allowed, recursion depth OK
+
+      index = (theDir->curPosition() / DIR_SIZE) - 1;  // determine current directory entry index
+      if (subdir.open(theDir, index, O_READ))
+      {
+        ++depth;        // limit recursion
+        lsPrint(&subdir, cmdStr, flags, indent + SUBDIR_INDENT); // recursively list subdirectory
+        --depth;
+        subdir.close();
+      }
+    }
+  }
+}
+
+/*
+ * NAME:
+ *  void lsPrintNext(SdFile * theDir, char * cmdStr, byte flags, byte indent)
+ *
+ * PARAMETERS:
+ *  SdFile * theDir = the directory to list (assumed opened)
+ *  char * cmdStr = the command line file/directory string (with possible wildcards)
+ *  byte flags = the inclusive OR of
+ *                  LS_SIZE - print the file size
+ *                  LS_R - recursively list subdirectories
+ *  byte indent = amount of space before file name
+ *                (used for recursive list to indicate subdirectory level)
+ *
+ * WHAT:
+ *  List directory's next contents to serial port.
+ *
+ *  Wildcard support rules:
+ *    Wildcard characters ('*', '?') only apply to the selection of filenames to
+ *    list, not to the listing of directory or subdirectory names. All directory
+ *    and subdirectory names are always listed.
+ *
+ * RETURN VALUES:
+ *  byte = WAS_EOF - EOF, WAS_FILE - normal file, or WAS_SUBDIR - subdirectory
+ *
+ * SPECIAL CONSIDERATIONS:
+ *  None.
+ */
+byte lsPrintNext(SdFile * theDir, char * cmdStr, byte flags, byte indent)
+{
+  byte pos = 0;           // output position
+  byte open_stat;         // file open status
+  byte status;            // return status
+  SdFile tempFile;
+  char fname[FILENAME_EXT_SIZE];
+
+  // Find next available object to display in the specified directory
+  while ((open_stat = tempFile.openNext(theDir, O_READ)))
+  {
+    if (tempFile.getFilename(fname)) // Get the filename of the object we're looking at
+    {
+      if (tempFile.isDir() || tempFile.isFile() || tempFile.isSubDir())
+      {
+        if (tempFile.isFile())        // wildcards only apply to files
+        {
+          if (wildcmp(cmdStr, fname)) // see if it matches the wildcard
+          {
+            status = WAS_FILE;
+            break;      // is a matching file name, display it
+          }
+          // else skip it
+        }
+        else    // is a subdirectory
+        {
+          status = WAS_SUBDIR;
+          break;        // display subdirectory name
+        }
+      }
+    }
+    tempFile.close();
+  }
+  if (!open_stat)
+  {
+    return WAS_EOF;     // nothing more in this (sub)directory
+  }
+
+  // output the file or directory name
+
+  // indent for dir level
+  for (byte i = 0; i < indent; i++)
+  {
+    NewSerial.write(' ');
+  }
+
+  // print name
+  pos += NewSerial.print(fname);
+
+  if (tempFile.isSubDir())
+  {
+    pos += NewSerial.write('/');    // subdirectory indicator
+  }
+  // print size if requested (files only)
+  if (tempFile.isFile() && (flags & LS_SIZE))
+  {
+    while (pos++ < LS_FIELD_SIZE)
+    {
+      NewSerial.write(' ');
+    }
+    NewSerial.write(' ');           // ensure at least 1 separating space
+    NewSerial.print(tempFile.fileSize());
+  }
+  NewSerial.writeln();
+  tempFile.close();
+  return status;
+}
 
