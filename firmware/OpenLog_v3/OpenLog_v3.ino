@@ -145,6 +145,10 @@
  
  29354 bytes
  
+ v3.20 Re-wrote baud rate system to support anything from 300bps to 1,000,000bps
+ 
+ 28,640 bytes (yay! saved a bunch by removing the text-based menu system)
+ 
  */
 
 #include <SdFat.h> //We do not use the built-in SD.h file because it calls Serial.print
@@ -333,9 +337,6 @@ void setup(void)
 
   read_system_settings(); //Load all system settings from EEPROM
 
-  if(setting_ignore_RX == OFF) //If we are NOT ignoring RX, then
-    check_emergency_reset(); //Look to see if the RX pin is being pulled low
-
   //Setup UART
   NewSerial.begin(setting_uart_speed);
   NewSerial.print(F("1"));
@@ -352,6 +353,9 @@ void setup(void)
 
   //Search for a config file and load any settings found. This will over-ride previous EEPROM settings if found.
   read_config_file();
+
+  if(setting_ignore_RX == OFF) //If we are NOT ignoring RX, then
+    check_emergency_reset(); //Look to see if the RX pin is being pulled low
 
   memset(folderTree, 0, sizeof(folderTree)); //Clear folder tree
 }
@@ -1014,10 +1018,12 @@ void record_config_file(void)
   //Record current system settings to the config file
   if(myFile.write(settings_string, strlen(settings_string)) != strlen(settings_string))
     NewSerial.println(F("error writing to file"));
+  
+  myFile.println(); //Add a break between lines
 
   //Add a decoder line to the file
   char helperString[35]; //This probably should not be hard coded but we're doing it anyway!
-  strcpy_P(helperString, PSTR("\n\r baud,escape,esc#,mode,verb,echo,ignoreRX\0"));
+  strcpy_P(helperString, PSTR("baud,escape,esc#,mode,verb,echo,ignoreRX\0"));
   myFile.write(helperString); //Add this string to the file
 
   myFile.sync(); //Sync all newly written data to card
@@ -1426,6 +1432,8 @@ void command_shell(void)
             NewSerial.print(F("error writing to file\n\r"));
           break;
         }
+        
+        if(dataLen < (sizeof(buffer) - 1)) tempFile.write("\n\r", 2); //If we didn't fill up the buffer then user must have sent NL. Append new line and return
       }
 
       tempFile.close();
