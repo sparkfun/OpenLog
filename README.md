@@ -49,3 +49,5 @@ Version History
 * **v2.5**  Added software reset command. Modified the read command to print extended ASCII characters.
 * **v2.51** Changed command prompt control to ignore \n for easier control from microcontroller.
 * **v3.0**  Migration to Arduino v1.0 and better recording speed at 115200bps and 57600bps.
+* **v3.1**  Better handling of recording during power loss.
+* **v3.2**  Freed up RAM for larger RX ring buffer. Added support for wildcards and ability to ignore emergency override.
