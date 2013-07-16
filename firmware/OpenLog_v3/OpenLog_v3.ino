@@ -1028,8 +1028,9 @@ void record_config_file(void)
   myFile.println(); //Add a break between lines
 
   //Add a decoder line to the file
-  char helperString[35]; //This probably should not be hard coded but we're doing it anyway!
-  strcpy_P(helperString, PSTR("baud,escape,esc#,mode,verb,echo,ignoreRX\0"));
+  #define HELP_STR "baud,escape,esc#,mode,verb,echo,ignoreRX\0"
+  char helperString[strlen(HELP_STR) + 1]; //strlen is preprocessed but returns one less because it ignores the \0
+  strcpy_P(helperString, PSTR(HELP_STR));
   myFile.write(helperString); //Add this string to the file
 
   myFile.sync(); //Sync all newly written data to card
