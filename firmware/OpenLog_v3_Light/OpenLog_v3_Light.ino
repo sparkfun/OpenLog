@@ -155,14 +155,13 @@ SerialPort<0, 900, 0> NewSerial;
 #define LOCATION_MAX_ESCAPE_CHAR	0x06
 #define LOCATION_VERBOSE                0x07
 #define LOCATION_ECHO                   0x08
+#define LOCATION_BAUD_SETTING_HIGH	0x09
+#define LOCATION_BAUD_SETTING_MID	0x0A
+#define LOCATION_BAUD_SETTING_LOW	0x0B
+#define LOCATION_IGNORE_RX		0x0C
 
-#define BAUD_2400	0
-#define BAUD_9600	1
-#define BAUD_57600	2
-#define BAUD_115200	3
-#define BAUD_4800	4
-#define BAUD_19200	5
-#define BAUD_38400	6
+#define BAUD_MIN  300
+#define BAUD_MAX  1000000
 
 #define MODE_NEWLOG	0
 #define MODE_SEQLOG     1
@@ -191,12 +190,13 @@ Sd2Card card;
 SdVolume volume;
 SdFile currentDirectory;
 
-byte setting_uart_speed; //This is the baud rate that the system runs at, default is 9600
+long setting_uart_speed; //This is the baud rate that the system runs at, default is 9600. Can be 1,200 to 1,000,000
 byte setting_system_mode; //This is the mode the system runs in, default is MODE_NEWLOG
 byte setting_escape_character; //This is the ASCII character we look for to break logging, default is ctrl+z
 byte setting_max_escape_character; //Number of escape chars before break logging, default is 3
 byte setting_verbose; //This controls the whether we get extended or simple responses.
 byte setting_echo; //This turns on/off echoing at the command prompt
+byte setting_ignore_RX; //This flag, when set to 1 will make OpenLog ignore the state of the RX pin when powering up
 
 //Passes back the available amount of free RAM
 int freeRam () 
@@ -260,18 +260,10 @@ void setup(void)
   power_timer2_disable();
   power_adc_disable();
 
-  check_emergency_reset(); //Look to see if the RX pin is being pulled low
-
   read_system_settings(); //Load all system settings from EEPROM
 
   //Setup UART
-  if(setting_uart_speed == BAUD_2400) NewSerial.begin(2400);
-  if(setting_uart_speed == BAUD_4800) NewSerial.begin(4800);
-  if(setting_uart_speed == BAUD_9600) NewSerial.begin(9600);
-  if(setting_uart_speed == BAUD_19200) NewSerial.begin(19200);
-  if(setting_uart_speed == BAUD_38400) NewSerial.begin(38400);
-  if(setting_uart_speed == BAUD_57600) NewSerial.begin(57600);
-  if(setting_uart_speed == BAUD_115200) NewSerial.begin(115200);
+  NewSerial.begin(setting_uart_speed);
   NewSerial.print(F("1"));
 
   //Setup SD & FAT
@@ -286,6 +278,9 @@ void setup(void)
 
   //Search for a config file and load any settings found. This will over-ride previous EEPROM settings if found.
   read_config_file();
+
+  if(setting_ignore_RX == OFF) //If we are NOT ignoring RX, then
+    check_emergency_reset(); //Look to see if the RX pin is being pulled low
 }
 
 void loop(void)
@@ -346,17 +341,29 @@ char* newlog(void)
   char new_file_name[13];
   while(1)
   {
+    sprintf_P(new_file_name, PSTR("LOG%05d.TXT"), new_file_number); //Splice the new file number into this file name
+
+    //Try to open file, if fail (file doesn't exist), then break
+    if (newFile.open(&currentDirectory, new_file_name, O_CREAT | O_EXCL | O_WRITE)) break;
+
+    //Try to open file and see if it is empty. If so, use it.
+    if (newFile.open(&currentDirectory, new_file_name, O_READ)) 
+    {
+      if (newFile.fileSize() == 0)
+      {
+        newFile.close();        // Close this existing file we just opened.
+        return(new_file_name);  // Use existing empty file.
+      }
+      newFile.close(); // Close this existing file we just opened.
+    }
+
+    //Try the next number
     new_file_number++;
     if(new_file_number > 65533) //There is a max of 65534 logs
     {
       NewSerial.print(F("!Too many logs:2!"));
       return(0); //Bail!
     }
-
-    sprintf_P(new_file_name, PSTR("LOG%05d.TXT"), new_file_number); //Splice the new file number into this file name
-
-    //Try to open file, if fail (file doesn't exist), then break
-    if (newFile.open(&currentDirectory, new_file_name, O_CREAT | O_EXCL | O_WRITE)) break;
   }
   newFile.close(); //Close this new file we just opened
 
@@ -550,7 +557,7 @@ void check_emergency_reset(void)
 void set_default_settings(void)
 {
   //Reset UART to 9600bps
-  EEPROM.write(LOCATION_BAUD_SETTING, BAUD_9600);
+  writeBaud(9600);
 
   //Reset system to new log mode
   EEPROM.write(LOCATION_SYSTEM_SETTING, MODE_NEWLOG);
@@ -567,6 +574,9 @@ void set_default_settings(void)
   //Reset echo to on
   EEPROM.write(LOCATION_ECHO, ON);
 
+  //Reset the ignore RX to 'Pay attention to RX!'
+  EEPROM.write(LOCATION_IGNORE_RX, OFF);
+
   //These settings are not recorded to the config file
   //We can't do it here because we are not sure the FAT system is init'd
 }
@@ -577,11 +587,11 @@ void read_system_settings(void)
 {
   //Read what the current UART speed is from EEPROM memory
   //Default is 9600
-  setting_uart_speed = EEPROM.read(LOCATION_BAUD_SETTING);
-  if(setting_uart_speed > 10) 
+  setting_uart_speed = readBaud(); //Combine the three bytes
+  if(setting_uart_speed < BAUD_MIN || setting_uart_speed > BAUD_MAX) 
   {
-    setting_uart_speed = BAUD_9600; //Reset UART to 9600 if there is no speed stored
-    EEPROM.write(LOCATION_BAUD_SETTING, setting_uart_speed);
+    setting_uart_speed = 9600; //Reset UART to 9600 if there is no speed stored
+    writeBaud(setting_uart_speed); //Record to EEPROM
   }
 
   //Determine the system mode we should be in
@@ -628,7 +638,16 @@ void read_system_settings(void)
     setting_echo = ON; //Reset to echo on
     EEPROM.write(LOCATION_ECHO, setting_echo);
   }
-  
+
+  //Read whether we should ignore RX at power up
+  //Some users need OpenLog to ignore the RX pin during power up
+  //Default is false or ignore
+  setting_ignore_RX = EEPROM.read(LOCATION_IGNORE_RX);
+  if(setting_ignore_RX > 1) 
+  {
+    setting_ignore_RX = OFF; //By default we DO NOT ignore RX
+    EEPROM.write(LOCATION_IGNORE_RX, setting_ignore_RX);
+  }
 }
 
 void read_config_file(void)
@@ -682,16 +701,17 @@ void read_config_file(void)
 #endif
 
   //Default the system settings in case things go horribly wrong
-  char new_system_baud = BAUD_9600;
-  char new_system_mode = MODE_NEWLOG;
-  char new_system_escape = 26;
-  char new_system_max_escape = 3;
-  char new_system_verbose = ON;
-  char new_system_echo = ON;
+  long new_system_baud = 9600;
+  byte new_system_mode = MODE_NEWLOG;
+  byte new_system_escape = 26;
+  byte new_system_max_escape = 3;
+  byte new_system_verbose = ON;
+  byte new_system_echo = ON;
+  byte new_system_ignore_RX = OFF;  
 
   //Parse the settings out
   byte i = 0, j = 0, setting_number = 0;
-  char new_setting[7]; //Max length of a setting is 6, the bps setting = '115200' plus '\0'
+  char new_setting[8]; //Max length of a setting is 6, the bps setting = '115200' plus '\0'
   byte new_setting_int = 0;
 
   for(i = 0 ; i < len; i++)
@@ -709,14 +729,10 @@ void read_config_file(void)
 
     if(setting_number == 0) //Baud rate
     {
-      if(strcmp_P(new_setting, PSTR("2400")) == 0) new_system_baud = BAUD_2400;
-      else if(strcmp_P(new_setting, PSTR("4800")) == 0) new_system_baud = BAUD_4800;
-      else if(strcmp_P(new_setting, PSTR("9600")) == 0) new_system_baud = BAUD_9600;
-      else if(strcmp_P(new_setting, PSTR("19200")) == 0) new_system_baud = BAUD_19200;
-      else if(strcmp_P(new_setting, PSTR("38400")) == 0) new_system_baud = BAUD_38400;
-      else if(strcmp_P(new_setting, PSTR("57600")) == 0) new_system_baud = BAUD_57600;
-      else if(strcmp_P(new_setting, PSTR("115200")) == 0) new_system_baud = BAUD_115200;
-      else new_system_baud = BAUD_9600; //Default is 9600bps
+      new_system_baud = strtolong(new_setting);
+
+      //Basic error checking
+      if(new_system_baud < BAUD_MIN || new_system_baud > BAUD_MAX) new_system_baud = 9600; //Default to 9600
     }
     else if(setting_number == 1) //Escape character
     {
@@ -743,33 +759,17 @@ void read_config_file(void)
       new_system_echo = new_setting_int;
       if(new_system_echo != ON && new_system_echo != OFF) new_system_echo = ON; //Default is on
     }
+    else if(setting_number == 6) //Ignore RX setting
+    {
+      new_system_ignore_RX = new_setting_int;
+      if(new_system_ignore_RX != ON && new_system_ignore_RX != OFF) new_system_ignore_RX = OFF; //Default is to listen to RX
+    }
     else
       //We're done! Stop looking for settings
       break;
 
     setting_number++;
   }
-
-#if DEBUG
-  //This will print the found settings. Use for debugging
-  NewSerial.print(F("Settings determined to be: "));
-
-  char temp_string[CFG_LENGTH]; //"115200,103,14,0,1,1\0" = 115200 bps, escape char of ASCII(103), 14 times, new log mode, verbose on, echo on.
-  char temp[CFG_LENGTH];
-
-  if(new_system_baud == BAUD_2400) strcpy_P(temp_string, PSTR("2400"));
-  if(new_system_baud == BAUD_4800) strcpy_P(temp_string, PSTR("4800"));
-  if(new_system_baud == BAUD_9600) strcpy_P(temp_string, PSTR("9600"));
-  if(new_system_baud == BAUD_19200) strcpy_P(temp_string, PSTR("19200"));
-  if(new_system_baud == BAUD_38400) strcpy_P(temp_string, PSTR("38400"));
-  if(new_system_baud == BAUD_57600) strcpy_P(temp_string, PSTR("57600"));
-  if(new_system_baud == BAUD_115200) strcpy_P(temp_string, PSTR("115200"));
-
-  sprintf_P(temp, PSTR(",%d,%d,%d,%d,%d\0"), new_system_escape, new_system_max_escape, new_system_mode, new_system_verbose, new_system_echo);
-  strcat(temp_string, temp); //Add this string to the system string
-
-  NewSerial.println(temp_string);
-#endif
 
   //We now have the settings loaded into the global variables. Now check if they're different from EEPROM settings
   boolean recordNewSettings = false;
@@ -778,17 +778,9 @@ void read_config_file(void)
     //If the baud rate from the file is different from the current setting,
     //Then update the setting to the file setting
     //And re-init the UART
-    EEPROM.write(LOCATION_BAUD_SETTING, new_system_baud);
+    writeBaud(new_system_baud); //Write this baudrate to EEPROM
     setting_uart_speed = new_system_baud;
-
-    //Move system to new uart speed
-    if(setting_uart_speed == BAUD_2400) NewSerial.begin(2400);
-    if(setting_uart_speed == BAUD_4800) NewSerial.begin(4800);
-    if(setting_uart_speed == BAUD_9600) NewSerial.begin(9600);
-    if(setting_uart_speed == BAUD_19200) NewSerial.begin(19200);
-    if(setting_uart_speed == BAUD_38400) NewSerial.begin(38400);
-    if(setting_uart_speed == BAUD_57600) NewSerial.begin(57600);
-    if(setting_uart_speed == BAUD_115200) NewSerial.begin(115200);
+    NewSerial.begin(setting_uart_speed); //Move system to new uart speed
 
     recordNewSettings = true;
   }
@@ -829,6 +821,14 @@ void read_config_file(void)
     //Goto new echo setting
     setting_echo = new_system_echo;
     EEPROM.write(LOCATION_ECHO, setting_echo);
+
+    recordNewSettings = true;
+  }
+
+  if(new_system_ignore_RX != setting_ignore_RX) {
+    //Goto new ignore setting
+    setting_ignore_RX = new_system_ignore_RX;
+    EEPROM.write(LOCATION_IGNORE_RX, setting_ignore_RX);
 
     recordNewSettings = true;
   }
@@ -895,32 +895,27 @@ void record_config_file(void)
   char settings_string[CFG_LENGTH]; //"115200,103,14,0,1,1\0" = 115200 bps, escape char of ASCII(103), 14 times, new log mode, verbose on, echo on.
 
   //Before we read the EEPROM values, they've already been tested and defaulted in the read_system_settings function
-  char current_system_baud = EEPROM.read(LOCATION_BAUD_SETTING);
-  char current_system_escape = EEPROM.read(LOCATION_ESCAPE_CHAR);
-  char current_system_max_escape = EEPROM.read(LOCATION_MAX_ESCAPE_CHAR);
-  char current_system_mode = EEPROM.read(LOCATION_SYSTEM_SETTING);
-  char current_system_verbose = EEPROM.read(LOCATION_VERBOSE);
-  char current_system_echo = EEPROM.read(LOCATION_ECHO);
-
-  //Determine current baud and copy it to string
-  char baudRate[6];
-  if(current_system_baud == BAUD_2400) strcpy_P(baudRate, PSTR("2400"));
-  if(current_system_baud == BAUD_4800) strcpy_P(baudRate, PSTR("4800"));
-  if(current_system_baud == BAUD_9600) strcpy_P(baudRate, PSTR("9600"));
-  if(current_system_baud == BAUD_19200) strcpy_P(baudRate, PSTR("19200"));
-  if(current_system_baud == BAUD_38400) strcpy_P(baudRate, PSTR("38400"));
-  if(current_system_baud == BAUD_57600) strcpy_P(baudRate, PSTR("57600"));
-  if(current_system_baud == BAUD_115200) strcpy_P(baudRate, PSTR("115200"));
+  long current_system_baud = readBaud();
+  byte current_system_escape = EEPROM.read(LOCATION_ESCAPE_CHAR);
+  byte current_system_max_escape = EEPROM.read(LOCATION_MAX_ESCAPE_CHAR);
+  byte current_system_mode = EEPROM.read(LOCATION_SYSTEM_SETTING);
+  byte current_system_verbose = EEPROM.read(LOCATION_VERBOSE);
+  byte current_system_echo = EEPROM.read(LOCATION_ECHO);
+  byte current_system_ignore_RX = EEPROM.read(LOCATION_IGNORE_RX);
 
   //Convert system settings to visible ASCII characters
-  sprintf_P(settings_string, PSTR("%s,%d,%d,%d,%d,%d\0"), baudRate, current_system_escape, current_system_max_escape, current_system_mode, current_system_verbose, current_system_echo);
+  sprintf_P(settings_string, PSTR("%ld,%d,%d,%d,%d,%d,%d\0"), current_system_baud, current_system_escape, current_system_max_escape, current_system_mode, current_system_verbose, current_system_echo, current_system_ignore_RX);
+
   //Record current system settings to the config file
   if(myFile.write(settings_string, strlen(settings_string)) != strlen(settings_string))
     NewSerial.println(F("error writing to file"));
 
+  myFile.println(); //Add a break between lines
+
   //Add a decoder line to the file
-  char helperString[47]; //This probably should not be hard coded but we're doing it anyway!
-  strcpy_P(helperString, PSTR("\n\rbaud,escape,esc#,mode,verb,echo\0")); //This is the name of the config file. 'config.sys' is probably a bad idea.
+  #define HELP_STR "baud,escape,esc#,mode,verb,echo,ignoreRX\0"
+  char helperString[strlen(HELP_STR) + 1]; //strlen is preprocessed but returns one less because it ignores the \0
+  strcpy_P(helperString, PSTR(HELP_STR));
   myFile.write(helperString); //Add this string to the file
 
   myFile.sync(); //Sync all newly written data to card
@@ -929,6 +924,37 @@ void record_config_file(void)
   //Now that the new config file has the current system settings, nothing else to do!
 }
 
+//Given a baud rate (long number = four bytes but we only use three), record to EEPROM
+void writeBaud(long uartRate)
+{
+  EEPROM.write(LOCATION_BAUD_SETTING_HIGH, (byte)((uartRate & 0x00FF0000) >> 16));
+  EEPROM.write(LOCATION_BAUD_SETTING_MID, (byte)(uartRate >> 8));
+  EEPROM.write(LOCATION_BAUD_SETTING_LOW, (byte)uartRate);
+}
+
+//Look up the baud rate. This requires three bytes be combined into one long
+long readBaud(void)
+{
+  byte uartSpeedHigh = EEPROM.read(LOCATION_BAUD_SETTING_HIGH);
+  byte uartSpeedMid = EEPROM.read(LOCATION_BAUD_SETTING_MID);
+  byte uartSpeedLow = EEPROM.read(LOCATION_BAUD_SETTING_LOW);
+
+  long uartSpeed = 0x00FF0000 & ((long)uartSpeedHigh << 16) | ((long)uartSpeedMid << 8) | uartSpeedLow; //Combine the three bytes
+
+  return(uartSpeed); 
+}
+
+
 //End core system functions
 //=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 
+//A rudimentary way to convert a string to a long 32 bit integer
+//Used by the read command, in command shell and baud from the system menu
+uint32_t strtolong(const char* str)
+{
+  uint32_t l = 0;
+  while(*str >= '0' && *str <= '9')
+    l = l * 10 + (*str++ - '0');
+
+  return l;
+}
