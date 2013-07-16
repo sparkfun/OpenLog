@@ -428,17 +428,29 @@ char* newlog(void)
   char new_file_name[13];
   while(1)
   {
+    sprintf_P(new_file_name, PSTR("LOG%05d.TXT"), new_file_number); //Splice the new file number into this file name
+
+    //Try to open file, if fail (file doesn't exist), then break
+    if (newFile.open(&currentDirectory, new_file_name, O_CREAT | O_EXCL | O_WRITE)) break;
+
+    //Try to open file and see if it is empty. If so, use it.
+    if (newFile.open(&currentDirectory, new_file_name, O_READ)) 
+    {
+      if (newFile.fileSize() == 0)
+      {
+        newFile.close();        // Close this existing file we just opened.
+        return(new_file_name);  // Use existing empty file.
+      }
+      newFile.close(); // Close this existing file we just opened.
+    }
+
+    //Try the next number
     new_file_number++;
     if(new_file_number > 65533) //There is a max of 65534 logs
     {
       NewSerial.print(F("!Too many logs:2!"));
       return(0); //Bail!
     }
-
-    sprintf_P(new_file_name, PSTR("LOG%05d.TXT"), new_file_number); //Splice the new file number into this file name
-
-    //Try to open file, if fail (file doesn't exist), then break
-    if (newFile.open(&currentDirectory, new_file_name, O_CREAT | O_EXCL | O_WRITE)) break;
   }
   newFile.close(); //Close this new file we just opened
 
