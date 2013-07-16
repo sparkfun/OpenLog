@@ -197,8 +197,9 @@ void(* Reset_AVR) (void) = 0; //Dirty way of resetting the ATmega, but it works 
 char folderTree[FOLDER_TRACK_DEPTH][12];
 
 #define CFG_FILENAME "config.txt" //This is the name of the file that contains the unit settings
-#define CFG_LENGTH  22 //Length of text found in config file: 
-//"115200,103,14,0,1,1,0\0" = 115200 bps, escape char of ASCII(103), 14 times, new log mode, verbose on, echo on, ignore RX false. 
+
+#define MAX_CFG "115200,103,14,0,1,1,0\0" //= 115200 bps, escape char of ASCII(103), 14 times, new log mode, verbose on, echo on, ignore RX false. 
+#define CFG_LENGTH (strlen(MAX_CFG) + 1) //Length of text found in config file. strlen ignores \0 so we have to add it back 
 #define SEQ_FILENAME "SEQLOG00.TXT" //This is the name for the file when you're in sequential mode
 
 //Internal EEPROM locations for the user settings
@@ -1880,7 +1881,7 @@ byte gotoDir(char *dir)
 
 void print_menu(void)
 {
-  NewSerial.println(F("OpenLog v3.20"));
+  NewSerial.println(F("OpenLog v3.21"));
   NewSerial.println(F("Basic commands:"));
   NewSerial.println(F("new <file>\t\t: Creates <file>"));
   NewSerial.println(F("append <file>\t\t: Appends text to end of <file>"));
