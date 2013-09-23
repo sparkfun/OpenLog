@@ -154,6 +154,10 @@
  
  Fixed issue #134: When removing files and there is a directory, all wildcard files are now removed correctly.
  Fixed issue #135: ls with wildcard works again. Thank you dlkeng!
+
+ v3.30 Added timestamped recording support. If enabled, each byte is prefixed with 4-byte timestamp in milliseconds.
+
+ Check examples directory for script that plays back the log in real time.
  
  */
 
@@ -198,7 +202,7 @@ char folderTree[FOLDER_TRACK_DEPTH][12];
 
 #define CFG_FILENAME "config.txt" //This is the name of the file that contains the unit settings
 
-#define MAX_CFG "115200,103,14,0,1,1,0\0" //= 115200 bps, escape char of ASCII(103), 14 times, new log mode, verbose on, echo on, ignore RX false. 
+#define MAX_CFG "115200,103,14,0,1,1,0,0\0" //= 115200 bps, escape char of ASCII(103), 14 times, new log mode, verbose on, echo on, ignore RX false, timestamp false. 
 #define CFG_LENGTH (strlen(MAX_CFG) + 1) //Length of text found in config file. strlen ignores \0 so we have to add it back 
 #define SEQ_FILENAME "SEQLOG00.TXT" //This is the name for the file when you're in sequential mode
 
@@ -214,6 +218,7 @@ char folderTree[FOLDER_TRACK_DEPTH][12];
 #define LOCATION_BAUD_SETTING_MID	0x0A
 #define LOCATION_BAUD_SETTING_LOW	0x0B
 #define LOCATION_IGNORE_RX		0x0C
+#define LOCATION_TIMESTAMP              0x0D
 
 #define BAUD_MIN  300
 #define BAUD_MAX  1000000
@@ -265,6 +270,7 @@ byte setting_max_escape_character; //Number of escape chars before break logging
 byte setting_verbose; //This controls the whether we get extended or simple responses.
 byte setting_echo; //This turns on/off echoing at the command prompt
 byte setting_ignore_RX; //This flag, when set to 1 will make OpenLog ignore the state of the RX pin when powering up
+byte setting_timestamp; //If set to 1, each saved byte is prefixed with unsigned long timestamp
 
 //The number of command line arguments
 //Increase to support more arguments but be aware of the memory restrictions
@@ -524,26 +530,32 @@ byte append_file(char* file_name)
 
   const byte LOCAL_BUFF_SIZE = 32; //This is the 2nd buffer. It pulls from the larger NewSerial buffer as quickly as possible.
   byte localBuffer[LOCAL_BUFF_SIZE];
+  byte bytes_to_receive;
   byte checkedSpot;
   byte escape_chars_received = 0;
+  unsigned long time;
 
   const uint16_t MAX_IDLE_TIME_MSEC = 500; //The number of milliseconds before unit goes to sleep
   const uint16_t MAX_TIME_BEFORE_SYNC_MSEC = 5000;
   uint32_t lastSyncTime = millis(); //Keeps track of the last time the file was synced
+  if (setting_timestamp)
+    bytes_to_receive = 1;
+  else
+    bytes_to_receive = LOCAL_BUFF_SIZE;
 
   printRam(); //Print the available RAM
 
   //Start recording incoming characters
   while(escape_chars_received < setting_max_escape_character) {
 
-    byte n = NewSerial.read(localBuffer, sizeof(localBuffer)); //Read characters from global buffer into the local buffer
+    byte n = NewSerial.read(localBuffer, bytes_to_receive); //Read characters from global buffer into the local buffer
     if (n > 0) //If we have characters, check for escape characters
     {
 
       if (localBuffer[0] == setting_escape_character) 
       {
         escape_chars_received++;
-
+        
         //Scan the local buffer for esacape characters
         for(checkedSpot = 1 ; checkedSpot < n ; checkedSpot++) {
           if(localBuffer[checkedSpot] == setting_escape_character) {
@@ -553,11 +565,18 @@ byte append_file(char* file_name)
             if(escape_chars_received == setting_max_escape_character) break;
           }
           else
-            escape_chars_received = 0; 
+            escape_chars_received = 0;
         }
       }
       else
         escape_chars_received = 0;
+      
+      if (setting_timestamp) {
+        localBuffer[4] = localBuffer[0];
+        time = millis();
+        memcpy(localBuffer, &time, sizeof(unsigned long));
+        n = 5;
+      }
 
       workingFile.write(localBuffer, n); //Record the buffer to the card
 
@@ -693,6 +712,9 @@ void set_default_settings(void)
 
   //Reset the ignore RX to 'Pay attention to RX!'
   EEPROM.write(LOCATION_IGNORE_RX, OFF);
+  
+  //Disable timestamp mode
+  EEPROM.write(LOCATION_TIMESTAMP, OFF);
 
   //These settings are not recorded to the config file
   //We can't do it here because we are not sure the FAT system is init'd
@@ -776,6 +798,13 @@ void read_system_settings(void)
     setting_ignore_RX = OFF; //By default we DO NOT ignore RX
     EEPROM.write(LOCATION_IGNORE_RX, setting_ignore_RX);
   }
+  
+  setting_timestamp = EEPROM.read(LOCATION_TIMESTAMP);
+  if(setting_timestamp > 1) 
+  {
+    setting_timestamp = OFF; //By default we DO NOT ignore RX
+    EEPROM.write(LOCATION_TIMESTAMP, setting_timestamp);
+  }
 }
 
 void read_config_file(void)
@@ -835,7 +864,8 @@ void read_config_file(void)
   byte new_system_max_escape = 3;
   byte new_system_verbose = ON;
   byte new_system_echo = ON;
-  byte new_system_ignore_RX = OFF;  
+  byte new_system_ignore_RX = OFF;
+  byte new_system_timestamp = OFF;
 
   //Parse the settings out
   byte i = 0, j = 0, setting_number = 0;
@@ -891,6 +921,11 @@ void read_config_file(void)
     {
       new_system_ignore_RX = new_setting_int;
       if(new_system_ignore_RX != ON && new_system_ignore_RX != OFF) new_system_ignore_RX = OFF; //Default is to listen to RX
+    }
+    else if(setting_number == 7) //Timestamp setting
+    {
+      new_system_timestamp = new_setting_int;
+      if(new_system_timestamp != ON && new_system_timestamp != OFF) new_system_timestamp = OFF; //Default is to not record timestamps
     }
     else
       //We're done! Stop looking for settings
@@ -962,6 +997,13 @@ void read_config_file(void)
     recordNewSettings = true;
   }
 
+  if(new_system_timestamp != setting_timestamp) {
+    setting_timestamp = new_system_timestamp;
+    EEPROM.write(LOCATION_TIMESTAMP, setting_timestamp);
+
+    recordNewSettings = true;
+  }
+  
   //We don't want to constantly record a new config file on each power on. Only record when there is a change.
   if(recordNewSettings == true)
     record_config_file(); //If we corrected some values because the config file was corrupt, then overwrite any corruption
@@ -1030,9 +1072,10 @@ void record_config_file(void)
   byte current_system_verbose = EEPROM.read(LOCATION_VERBOSE);
   byte current_system_echo = EEPROM.read(LOCATION_ECHO);
   byte current_system_ignore_RX = EEPROM.read(LOCATION_IGNORE_RX);
+  byte current_system_timestamp = EEPROM.read(LOCATION_TIMESTAMP);
 
   //Convert system settings to visible ASCII characters
-  sprintf_P(settings_string, PSTR("%ld,%d,%d,%d,%d,%d,%d\0"), current_system_baud, current_system_escape, current_system_max_escape, current_system_mode, current_system_verbose, current_system_echo, current_system_ignore_RX);
+  sprintf_P(settings_string, PSTR("%ld,%d,%d,%d,%d,%d,%d,%d\0"), current_system_baud, current_system_escape, current_system_max_escape, current_system_mode, current_system_verbose, current_system_echo, current_system_ignore_RX, current_system_timestamp);
 
   //Record current system settings to the config file
   if(myFile.write(settings_string, strlen(settings_string)) != strlen(settings_string))
@@ -1041,7 +1084,7 @@ void record_config_file(void)
   myFile.println(); //Add a break between lines
 
   //Add a decoder line to the file
-  #define HELP_STR "baud,escape,esc#,mode,verb,echo,ignoreRX\0"
+  #define HELP_STR "baud,escape,esc#,mode,verb,echo,ignoreRX,timestamp\0"
   char helperString[strlen(HELP_STR) + 1]; //strlen is preprocessed but returns one less because it ignores the \0
   strcpy_P(helperString, PSTR(HELP_STR));
   myFile.write(helperString); //Add this string to the file
