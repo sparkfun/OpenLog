@@ -4,7 +4,7 @@ OpenLog
 [![OpenLog](https://dlnmh9ip6v2uc.cloudfront.net/images/products/9/5/3/0/09530-01_i_ma.jpg)  
 *OpenLog (DEV-09530)*](https://www.sparkfun.com/products/9530)
 
-OpenLog is an open source project to create a simple to use data logger. 
+OpenLog is an open source data logger that works over a simple serial connection. 
 
 OpenLog v1 is stable but only supports FAT16 and up to 2GB.  
 OpenLog v2 is a bit buggy but supports FAT32 and SD cards up to 16GB.  
@@ -16,16 +16,18 @@ License Information
 The hardware design and firmware are released under [Creative Commons Share-alike 3.0](http://creativecommons.org/licenses/by-sa/3.0/).  
 The FAT16/FAT32 firmware was originally designed by Roland Riegel and is released under [GPL v2](http://www.gnu.org/licenses/gpl-2.0.html).  
 OpenLog v2.0 and above uses sdfatlib written by Bill Greiman and is released under [GPL v3](http://www.gnu.org/licenses/gpl-3.0.html).  
-The OpenLog firmware was created by SparkFun Electronics.
+The OpenLog firmware was created by SparkFun Electronics, and is open source so please feel free to do anything you want with it; 
+you buy me a beer if you use this and we meet someday ([Beerware license](http://en.wikipedia.org/wiki/Beerware)).
 
 Repository Contents
 -------------------
-
-* **/hardware** - Hardware design files for the OpenLog PCB. These files were designed in Eagle CAD.
-* **/firmware** 
+* **/Firmware** 
     * OpenLog_v3 - Firmware that ships with OpenLog
     * OpenLog_v3_Light - Alternative version to allow for larger buffers
     * Examples - Example Arduino code for controlling and testing OpenLog
+* **/Fritzing** - Fritzing image showing the connections between the OpenLog and an FTDI Basic
+* **/Hardware** - Hardware design files for the OpenLog PCB. These files were designed in Eagle CAD.
+
 
 Version History
 ---------------
