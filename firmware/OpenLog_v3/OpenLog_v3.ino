@@ -155,13 +155,33 @@
  Fixed issue #134: When removing files and there is a directory, all wildcard files are now removed correctly.
  Fixed issue #135: ls with wildcard works again. Thank you dlkeng!
  
+ v3.3
+ 
+ 28,350 Using the latest SdFat lib from Bill: https://code.google.com/p/sdfatlib/downloads/list
+ Using Arduino v1.5.4
+ 
+ Fixed issue 160: https://github.com/sparkfun/OpenLog/issues/160
+ Logs now increment continously regardless of what file may be on the card. Adds 6 bytes.
+ 
+ Added feature/issue 166: If escape characters is set to zero, it ignores all escape characters. Adds 200 bytes.
+ 
+ Fixed issue 164 - Reducing RX buffer size to allow for correct baud rate changes.
+ SerialPort<0, 780, 0> NewSerial; //Fails
+ SerialPort<0, 750, 0> NewSerial; //Works
+ 
+ Fixed issue 163 - using dlkeng's fix to get baud rate to work at 300 baud. 
+ Adds 80 bytes
+ 
+ Increased escape character limits to 0 and 254. If set to zero, it will not check for escape characters.
+ 
  */
 
 #include <SdFat.h> //We do not use the built-in SD.h file because it calls Serial.print
 #include <SerialPort.h> //This is a new/beta library written by Bill Greiman. You rock Bill!
 #include <EEPROM.h>
 
-SerialPort<0, 780, 0> NewSerial;
+
+SerialPort<0, 750, 0> NewSerial;
 //SerialPort<0, 680, 0> NewSerial;
 //SerialPort<0, 580, 0> NewSerial;
 //This is a very important buffer declaration. This sets the <port #, rx size, tx size>. We set
@@ -346,6 +366,14 @@ void setup(void)
 
   //Setup UART
   NewSerial.begin(setting_uart_speed);
+  if (setting_uart_speed < 500)      // check for slow baud rates
+  {
+    //There is an error in the Serial library for lower than 500bps. 
+    //This fixes it. See issue 163: https://github.com/sparkfun/OpenLog/issues/163
+    // redo USART baud rate configuration
+    UBRR0 = (F_CPU / (16UL * setting_uart_speed)) - 1;
+    UCSR0A &= ~_BV(U2X0);
+  }
   NewSerial.print(F("1"));
 
   //Setup SD & FAT
@@ -454,6 +482,8 @@ char* newlog(void)
   }
   newFile.close(); //Close this new file we just opened
 
+  new_file_number++; //Increment so the next power up uses the next file #
+
   //Record new_file number to EEPROM
   lsb = (byte)(new_file_number & 0x00FF);
   msb = (byte)((new_file_number & 0xFF00) >> 8);
@@ -468,7 +498,6 @@ char* newlog(void)
   NewSerial.println(new_file_name);
 #endif
 
-  //  append_file(new_file_name);
   return(new_file_name);
 }
 
@@ -532,6 +561,54 @@ byte append_file(char* file_name)
   uint32_t lastSyncTime = millis(); //Keeps track of the last time the file was synced
 
   printRam(); //Print the available RAM
+
+  //Check if we should ignore escape characters
+  //If we are ignoring escape characters the recording loop is infinite and can be made shorter (less checking)
+  //This should allow for recording at higher incoming rates
+  if(setting_max_escape_character == 0)
+  {
+    //Start recording incoming characters
+    //With no escape characters, do this infinitely
+    while(1) {
+
+      byte n = NewSerial.read(localBuffer, sizeof(localBuffer)); //Read characters from global buffer into the local buffer
+      if (n > 0) //If we have characters, check for escape characters
+      {
+        workingFile.write(localBuffer, n); //Record the buffer to the card
+
+        STAT1_PORT ^= (1<<STAT1); //Toggle the STAT1 LED each time we record the buffer
+
+        if((millis() - lastSyncTime) > MAX_TIME_BEFORE_SYNC_MSEC) //This will force a sync approximately every 5 seconds
+        { 
+          //This is here to make sure a log is recorded in the instance
+          //where the user is throwing non-stop data at the unit from power on to forever
+          workingFile.sync(); //Sync the card
+          lastSyncTime = millis();
+        }
+
+      }
+      //No characters recevied?
+      else if( (millis() - lastSyncTime) > MAX_IDLE_TIME_MSEC) { //If we haven't received any characters in 2s, goto sleep
+        workingFile.sync(); //Sync the card before we go to sleep
+
+        STAT1_PORT &= ~(1<<STAT1); //Turn off stat LED to save power
+
+        power_timer0_disable(); //Shut down peripherals we don't need
+        power_spi_disable();
+        sleep_mode(); //Stop everything and go to sleep. Wake up if serial character received
+
+        power_spi_enable(); //After wake up, power up peripherals
+        power_timer0_enable();
+
+        escape_chars_received = 0; // Clear the esc flag as it has timed out
+        lastSyncTime = millis(); //Reset the last sync time to now
+      }
+
+    }
+
+  }
+
+  //We only get this far if escape characters are more than zero
 
   //Start recording incoming characters
   while(escape_chars_received < setting_max_escape_character) {
@@ -732,7 +809,7 @@ void read_system_settings(void)
   //Read the number of escape_characters to look for
   //Default is 3
   setting_max_escape_character = EEPROM.read(LOCATION_MAX_ESCAPE_CHAR);
-  if(setting_max_escape_character == 0 || setting_max_escape_character == 255) 
+  if(setting_max_escape_character == 255) 
   {
     setting_max_escape_character = 3; //Reset number of escape characters to 3
     EEPROM.write(LOCATION_MAX_ESCAPE_CHAR, setting_max_escape_character);
@@ -870,7 +947,7 @@ void read_config_file(void)
     else if(setting_number == 2) //Max amount escape character
     {
       new_system_max_escape = new_setting_int;
-      if(new_system_max_escape == 0 || new_system_max_escape > 10) new_system_max_escape = 3; //Default is 3
+      if(new_system_max_escape > 254) new_system_max_escape = 3; //Default is 3
     }
     else if(setting_number == 3) //System mode
     {
@@ -1041,7 +1118,7 @@ void record_config_file(void)
   myFile.println(); //Add a break between lines
 
   //Add a decoder line to the file
-  #define HELP_STR "baud,escape,esc#,mode,verb,echo,ignoreRX\0"
+#define HELP_STR "baud,escape,esc#,mode,verb,echo,ignoreRX\0"
   char helperString[strlen(HELP_STR) + 1]; //strlen is preprocessed but returns one less because it ignores the \0
   strcpy_P(helperString, PSTR(HELP_STR));
   myFile.write(helperString); //Add this string to the file
@@ -1893,7 +1970,7 @@ byte gotoDir(char *dir)
 
 void print_menu(void)
 {
-  NewSerial.println(F("OpenLog v3.21"));
+  NewSerial.println(F("OpenLog v3.3"));
   NewSerial.println(F("Basic commands:"));
   NewSerial.println(F("new <file>\t\t: Creates <file>"));
   NewSerial.println(F("append <file>\t\t: Appends text to end of <file>"));
@@ -2057,10 +2134,10 @@ void system_menu(void)
     }
     if(command == '6')
     {
-      byte choice = 10;
-      while(choice > 9 || choice < 1)
+      byte choice = 255;
+      while(choice == 255)
       {
-        NewSerial.print(F("\n\rEnter number of escape characters to look for (1 to 9): "));
+        NewSerial.print(F("\n\rEnter number of escape characters to look for (0 to 254): "));
         while(!NewSerial.available()); //Wait for user to hit character
         choice = NewSerial.read() - '0';
       }
@@ -2428,4 +2505,5 @@ byte lsPrintNext(SdFile * theDir, char * cmdStr, byte flags, byte indent)
   tempFile.close();
   return status;
 }
+
 
