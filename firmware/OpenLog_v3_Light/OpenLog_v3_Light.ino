@@ -123,7 +123,7 @@
 #include <SerialPort.h> //This is a new/beta library written by Bill Greiman. You rock Bill!
 #include <EEPROM.h>
 
-SerialPort<0, 900, 0> NewSerial;
+SerialPort<0, 800, 0> NewSerial;
 //This is a very important buffer declaration. This sets the <port #, rx size, tx size>. We set
 //the TX buffer to zero because we will be spending most of our time needing to buffer the incoming (RX) characters.
 //1100 fails on card init and causes FAT table corruption
@@ -144,7 +144,7 @@ SerialPort<0, 900, 0> NewSerial;
 
 #define CFG_FILENAME "config.txt" //This is the name of the file that contains the unit settings
 
-#define MAX_CFG "115200,103,14,0,1,1,0\0" //= 115200 bps, escape char of ASCII(103), 14 times, new log mode, verbose on, echo on, ignore RX false. 
+#define MAX_CFG "115200,103,214,0,1,1,0\0" //= 115200 bps, escape char of ASCII(103), 214 times, new log mode, verbose on, echo on, ignore RX false. 
 #define CFG_LENGTH (strlen(MAX_CFG) + 1) //Length of text found in config file. strlen ignores \0 so we have to add it back 
 #define SEQ_FILENAME "SEQLOG00.TXT" //This is the name for the file when you're in sequential modeu
 
@@ -192,7 +192,7 @@ Sd2Card card;
 SdVolume volume;
 SdFile currentDirectory;
 
-long setting_uart_speed; //This is the baud rate that the system runs at, default is 9600. Can be 1,200 to 1,000,000
+long setting_uart_speed; //This is the baud rate that the system runs at, default is 9600. Can be 300 to 1,000,000
 byte setting_system_mode; //This is the mode the system runs in, default is MODE_NEWLOG
 byte setting_escape_character; //This is the ASCII character we look for to break logging, default is ctrl+z
 byte setting_max_escape_character; //Number of escape chars before break logging, default is 3
@@ -266,6 +266,14 @@ void setup(void)
 
   //Setup UART
   NewSerial.begin(setting_uart_speed);
+  if (setting_uart_speed < 500)      // check for slow baud rates
+  {
+    //There is an error in the Serial library for lower than 500bps. 
+    //This fixes it. See issue 163: https://github.com/sparkfun/OpenLog/issues/163
+    // redo USART baud rate configuration
+    UBRR0 = (F_CPU / (16UL * setting_uart_speed)) - 1;
+    UCSR0A &= ~_BV(U2X0);
+  }
   NewSerial.print(F("1"));
 
   //Setup SD & FAT
@@ -289,7 +297,10 @@ void loop(void)
 {
   //If we are in new log mode, find a new file name to write to
   if(setting_system_mode == MODE_NEWLOG)
+  {
+    //new_file_name = newlog();
     append_file(newlog()); //Append the file name that newlog() returns
+  }
 
   //If we are in sequential log mode, determine if seqlog.txt has been created or not, and then open it for logging
   if(setting_system_mode == MODE_SEQLOG)
@@ -369,6 +380,8 @@ char* newlog(void)
   }
   newFile.close(); //Close this new file we just opened
 
+  new_file_number++; //Increment so the next power up uses the next file #
+
   //Record new_file number to EEPROM
   lsb = (byte)(new_file_number & 0x00FF);
   msb = (byte)((new_file_number & 0xFF00) >> 8);
@@ -437,7 +450,7 @@ byte append_file(char* file_name)
   NewSerial.print(F("<")); //give a different prompt to indicate no echoing
   digitalWrite(statled1, HIGH); //Turn on indicator LED
 
-  const byte LOCAL_BUFF_SIZE = 32; //This is the 2nd buffer. It pulls from the larger NewSerial buffer as quickly as possible.
+  const byte LOCAL_BUFF_SIZE = 128; //This is the 2nd buffer. It pulls from the larger NewSerial buffer as quickly as possible.
   byte localBuffer[LOCAL_BUFF_SIZE];
 
   const uint16_t MAX_IDLE_TIME_MSEC = 500; //The number of milliseconds before unit goes to sleep
@@ -617,7 +630,7 @@ void read_system_settings(void)
   //Read the number of escape_characters to look for
   //Default is 3
   setting_max_escape_character = EEPROM.read(LOCATION_MAX_ESCAPE_CHAR);
-  if(setting_max_escape_character == 0 || setting_max_escape_character == 255) 
+  if(setting_max_escape_character == 255) 
   {
     setting_max_escape_character = 3; //Reset number of escape characters to 3
     EEPROM.write(LOCATION_MAX_ESCAPE_CHAR, setting_max_escape_character);
@@ -744,7 +757,7 @@ void read_config_file(void)
     else if(setting_number == 2) //Max amount escape character
     {
       new_system_max_escape = new_setting_int;
-      if(new_system_max_escape == 0 || new_system_max_escape > 10) new_system_max_escape = 3; //Default is 3
+      if(new_system_max_escape > 254) new_system_max_escape = 3; //Default is 3
     }
     else if(setting_number == 3) //System mode
     {
@@ -894,7 +907,7 @@ void record_config_file(void)
   }
   //Config was successfully created, now record current system settings to the config file
 
-  char settings_string[CFG_LENGTH]; //"115200,103,14,0,1,1\0" = 115200 bps, escape char of ASCII(103), 14 times, new log mode, verbose on, echo on.
+  char settings_string[CFG_LENGTH]; //"115200,103,214,0,1,1\0" = 115200 bps, escape char of ASCII(103), 214 times, new log mode, verbose on, echo on.
 
   //Before we read the EEPROM values, they've already been tested and defaulted in the read_system_settings function
   long current_system_baud = readBaud();

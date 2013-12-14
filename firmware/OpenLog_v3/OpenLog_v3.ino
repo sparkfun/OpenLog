@@ -551,7 +551,7 @@ byte append_file(char* file_name)
   NewSerial.print(F("<")); //give a different prompt to indicate no echoing
   digitalWrite(statled1, HIGH); //Turn on indicator LED
 
-  const byte LOCAL_BUFF_SIZE = 32; //This is the 2nd buffer. It pulls from the larger NewSerial buffer as quickly as possible.
+  const byte LOCAL_BUFF_SIZE = 128; //This is the 2nd buffer. It pulls from the larger NewSerial buffer as quickly as possible.
   byte localBuffer[LOCAL_BUFF_SIZE];
   byte checkedSpot;
   byte escape_chars_received = 0;
