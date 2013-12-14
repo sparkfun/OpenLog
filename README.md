@@ -53,3 +53,4 @@ Version History
 * **v3.0**  Migration to Arduino v1.0 and better recording speed at 115200bps and 57600bps.
 * **v3.1**  Better handling of recording during power loss.
 * **v3.2**  Freed up RAM for larger RX ring buffer. Added support for wildcards and ability to ignore emergency override.
+* **v3.3**  Added ability to ignore escape character checking and corrected incremental log naming.
