@@ -218,7 +218,7 @@ char folderTree[FOLDER_TRACK_DEPTH][12];
 
 #define CFG_FILENAME "config.txt" //This is the name of the file that contains the unit settings
 
-#define MAX_CFG "115200,103,14,0,1,1,0\0" //= 115200 bps, escape char of ASCII(103), 14 times, new log mode, verbose on, echo on, ignore RX false. 
+#define MAX_CFG "115200,103,214,0,1,1,0\0" //= 115200 bps, escape char of ASCII(103), 214 times, new log mode, verbose on, echo on, ignore RX false. 
 #define CFG_LENGTH (strlen(MAX_CFG) + 1) //Length of text found in config file. strlen ignores \0 so we have to add it back 
 #define SEQ_FILENAME "SEQLOG00.TXT" //This is the name for the file when you're in sequential mode
 
