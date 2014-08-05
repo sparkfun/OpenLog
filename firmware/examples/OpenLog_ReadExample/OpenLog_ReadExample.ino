@@ -124,7 +124,7 @@ void createFile(char *fileName) {
 
   //New way
   //OpenLog.print("new ");
-  //OpenLog.println(filename); //regular println works with OpenLog v2.51 and above
+  //OpenLog.println(fileName); //regular println works with OpenLog v2.51 and above
 
   //Wait for OpenLog to return to waiting for a command
   while(1) {
@@ -156,7 +156,7 @@ void readFile(char *fileName) {
 
   //New way
   //OpenLog.print("read ");
-  //OpenLog.println(filename); //regular println works with OpenLog v2.51 and above
+  //OpenLog.println(fileName); //regular println works with OpenLog v2.51 and above
 
   //The OpenLog echos the commands we send it by default so we have 'read log823.txt\r' sitting 
   //in the RX buffer. Let's try to not print this.
@@ -203,7 +203,7 @@ void readDisk() {
 
   //New way
   //OpenLog.print("read ");
-  //OpenLog.println(filename); //regular println works with OpenLog v2.51 and above
+  //OpenLog.println(fileName); //regular println works with OpenLog v2.51 and above
 
   //The OpenLog echos the commands we send it by default so we have 'disk\r' sitting 
   //in the RX buffer. Let's try to not print this.
