@@ -1535,6 +1535,16 @@ void command_shell(void)
 #endif
           break;
         }
+        
+        //If we see the escape character at the end of the buffer then record up to
+        //that point in the buffer excluding the escape char
+        //See issue 168: https://github.com/sparkfun/OpenLog/issues/168
+        /*if(buffer[dataLen] == setting_escape_character)
+        {
+          //dataLen -= 1; //Adjust dataLen to remove the escape char
+          tempFile.write((byte*) buffer, dataLen); //write text to file
+          break; //Quit recording to file
+        }*/
 
         //write text to file
         if(tempFile.write((byte*) buffer, dataLen) != dataLen) {
@@ -1877,6 +1887,18 @@ byte read_line(char* buffer, byte buffer_length)
       //You never know what fprintf or sprintf is going to throw at the buffer
       //See issue 66: https://github.com/nseidle/OpenLog/issues/66
     }
+    /*else if (c == setting_escape_character) {
+      NewSerial.println();
+      buffer[read_length] = c;
+      buffer[read_length + 1] = '\0';
+      break;
+      //If we see an escape character bail recording whatever is in the current buffer
+      //up to the escape char
+      //This is used mostly when doing the write command where we need
+      //To capture the escape command and immediately record
+      //the buffer then stop asking for input from user
+      //See issue 168: https://github.com/sparkfun/OpenLog/issues/168
+    }*/
     else {
       buffer[read_length] = c;
       ++read_length;
