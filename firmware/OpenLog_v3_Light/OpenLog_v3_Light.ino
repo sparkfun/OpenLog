@@ -351,7 +351,7 @@ char* newlog(void)
 
   //Search for next available log spot
   //char new_file_name[] = "LOG00000.TXT";
-  char new_file_name[13];
+  static char new_file_name[13];
   while(1)
   {
     sprintf_P(new_file_name, PSTR("LOG%05d.TXT"), new_file_number); //Splice the new file number into this file name
