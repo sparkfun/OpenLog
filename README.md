@@ -6,9 +6,9 @@ OpenLog
 
 OpenLog is an open source data logger that works over a simple serial connection. 
 
-OpenLog v1 is stable but only supports FAT16 and up to 2GB.  
+OpenLog v3 is stable, supports FAT32 cards up to 64GB and supports higher record speeds (115200/57600).
 OpenLog v2 is a bit buggy but supports FAT32 and SD cards up to 16GB.  
-OpenLog v3 is stable, supports FAT32 and supports higher record speeds (115200/57600).
+OpenLog v1 is stable but only supports FAT16 and up to 2GB.  
 
 License Information
 -------------------
