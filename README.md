@@ -4,13 +4,7 @@ OpenLog
 [![OpenLog](https://dlnmh9ip6v2uc.cloudfront.net/images/products/9/5/3/0/09530-01_i_ma.jpg)  
 *OpenLog (DEV-09530)*](https://www.sparkfun.com/products/9530)
 
-OpenLog is an open source data logger that works over a simple serial connection. 
-
-OpenLog v3 is stable, supports FAT32 cards up to 64GB and supports higher record speeds (115200/57600).
-
-OpenLog v2 is a bit buggy but supports FAT32 and SD cards up to 16GB.  
-
-OpenLog v1 is stable but only supports FAT16 and up to 2GB.  
+OpenLog is an open source data logger that works over a simple serial connection and supports microSD cards up to 64GB. 
 
 License Information
 -------------------
@@ -33,6 +27,12 @@ Repository Contents
 
 Version History
 ---------------
+
+OpenLog v1 is stable but only supports FAT16 and up to 2GB.  
+
+OpenLog v2 is a bit buggy but supports FAT32 and SD cards up to 16GB.  
+
+OpenLog v3 is stable, supports FAT32 cards up to 64GB and supports higher record speeds (115200/57600).
 
 * **v1.0**  Buggy initial release
 * **v1.1**  Small changes to system settings and EEPROM storage.
