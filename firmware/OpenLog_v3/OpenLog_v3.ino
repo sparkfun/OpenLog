@@ -173,7 +173,12 @@
  Adds 80 bytes
  
  Increased escape character limits to 0 and 254. If set to zero, it will not check for escape characters.
- 
+
+ 8/20/2015
+ Using codebender because Arduino IDE is unusable on a laptop with a high density screen. Grrr.
+ Working on issue 168.
+ Fixed issue 178. Thanks jremington!
+
  */
 
 #include <SdFat.h> //We do not use the built-in SD.h file because it calls Serial.print
@@ -456,7 +461,7 @@ char* newlog(void)
   char new_file_name[13];
   while(1)
   {
-    sprintf_P(new_file_name, PSTR("LOG%05d.TXT"), new_file_number); //Splice the new file number into this file name
+    sprintf_P(new_file_name, PSTR("LOG%05u.TXT"), new_file_number); //Splice the new file number into this file name
 
     //Try to open file, if fail (file doesn't exist), then break
     if (newFile.open(&currentDirectory, new_file_name, O_CREAT | O_EXCL | O_WRITE)) break;
@@ -569,14 +574,14 @@ byte append_file(char* file_name)
   {
     //Start recording incoming characters
     //With no escape characters, do this infinitely
-    while(1) {
-
-      byte n = NewSerial.read(localBuffer, sizeof(localBuffer)); //Read characters from global buffer into the local buffer
-      if (n > 0) //If we have characters, check for escape characters
+    while(1)
+    {
+      byte charsToRecord = NewSerial.read(localBuffer, sizeof(localBuffer)); //Read characters from global buffer into the local buffer
+      if (charsToRecord > 0) //If we have characters, check for escape characters
       {
-        workingFile.write(localBuffer, n); //Record the buffer to the card
+        workingFile.write(localBuffer, charsToRecord); //Record the buffer to the card
 
-        STAT1_PORT ^= (1<<STAT1); //Toggle the STAT1 LED each time we record the buffer
+        toggleLED(statled1); //STAT1_PORT ^= (1<<STAT1); //Toggle the STAT1 LED each time we record the buffer
 
         if((millis() - lastSyncTime) > MAX_TIME_BEFORE_SYNC_MSEC) //This will force a sync approximately every 5 seconds
         { 
@@ -603,18 +608,17 @@ byte append_file(char* file_name)
         escape_chars_received = 0; // Clear the esc flag as it has timed out
         lastSyncTime = millis(); //Reset the last sync time to now
       }
-
     }
-
   }
 
   //We only get this far if escape characters are more than zero
 
   //Start recording incoming characters
-  while(escape_chars_received < setting_max_escape_character) {
+  while(escape_chars_received < setting_max_escape_character)
+  {
 
-    byte n = NewSerial.read(localBuffer, sizeof(localBuffer)); //Read characters from global buffer into the local buffer
-    if (n > 0) //If we have characters, check for escape characters
+    byte charsToRecord = NewSerial.read(localBuffer, sizeof(localBuffer)); //Read characters from global buffer into the local buffer
+    if (charsToRecord > 0) //If we have characters, check for escape characters
     {
 
       if (localBuffer[0] == setting_escape_character) 
@@ -622,12 +626,16 @@ byte append_file(char* file_name)
         escape_chars_received++;
 
         //Scan the local buffer for esacape characters
-        for(checkedSpot = 1 ; checkedSpot < n ; checkedSpot++) {
+        for(checkedSpot = 1 ; checkedSpot < charsToRecord ; checkedSpot++)
+        {
           if(localBuffer[checkedSpot] == setting_escape_character) {
             escape_chars_received++;
-            //If n is greater than 3 there's a chance here where we receive three esc chars
+            //If charsToRecord is greater than 3 there's a chance here where we receive three esc chars
             // and then reset the variable: 26 26 26 A T + would not escape correctly
-            if(escape_chars_received == setting_max_escape_character) break;
+            if(escape_chars_received == setting_max_escape_character)
+            {
+              break;
+            }
           }
           else
             escape_chars_received = 0; 
@@ -636,9 +644,9 @@ byte append_file(char* file_name)
       else
         escape_chars_received = 0;
 
-      workingFile.write(localBuffer, n); //Record the buffer to the card
+      workingFile.write(localBuffer, charsToRecord); //Record the buffer to the card
 
-      STAT1_PORT ^= (1<<STAT1); //Toggle the STAT1 LED each time we record the buffer
+      toggleLED(statled1); //STAT1_PORT ^= (1<<STAT1); //Toggle the STAT1 LED each time we record the buffer
 
       if((millis() - lastSyncTime) > MAX_TIME_BEFORE_SYNC_MSEC) //This will force a sync approximately every 5 seconds
       { 
@@ -712,12 +720,12 @@ void check_emergency_reset(void)
   for(byte i = 0 ; i < 40 ; i++)
   {
     delay(25);
-    STAT1_PORT ^= (1<<STAT1); //Blink the stat LEDs
+    toggleLED(statled1); //STAT1_PORT ^= (1<<STAT1); //Blink the stat LEDs
 
     if(digitalRead(0) == HIGH) return; //Check to see if RX is not low anymore
 
     delay(25);
-    STAT2_PORT ^= (1<<STAT2); //Blink the stat LEDs
+    toggleLED(statled2); //STAT2_PORT ^= (1<<STAT2); //Blink the stat LEDs
 
     if(digitalRead(0) == HIGH) return; //Check to see if RX is not low anymore
   }		
@@ -742,8 +750,8 @@ void check_emergency_reset(void)
   while(1)
   {
     delay(500);
-    STAT1_PORT ^= (1<<STAT1); //Blink the stat LEDs
-    STAT2_PORT ^= (1<<STAT2); //Blink the stat LEDs
+    toggleLED(statled1); //STAT1_PORT ^= (1<<STAT1); //Blink the stat LEDs
+    toggleLED(statled2); //STAT2_PORT ^= (1<<STAT2); //Blink the stat LEDs
   }
 }
 
@@ -1856,7 +1864,9 @@ byte read_line(char* buffer, byte buffer_length)
     while (!NewSerial.available());
     byte c = NewSerial.read();
 
-    STAT1_PORT ^= (1<<STAT1); //Blink the stat LED while typing
+    //This fails to compile in Arduino 1.6.1
+    //STAT1_PORT ^= (1<<STAT1); //Blink the stat LED while typing
+    toggleLED(statled1);
 
     if(c == 0x08 || c == 0x7f) { //Backspace characters
       if(read_length < 1)
@@ -2528,4 +2538,10 @@ byte lsPrintNext(SdFile * theDir, char * cmdStr, byte flags, byte indent)
   return status;
 }
 
-
+//Given a pin, it will toggle it from high to low or vice versa
+void toggleLED(byte pinNumber)
+{
+  if(digitalRead(pinNumber)) digitalWrite(pinNumber, LOW);
+  else digitalWrite(pinNumber, HIGH);
+}
+  
