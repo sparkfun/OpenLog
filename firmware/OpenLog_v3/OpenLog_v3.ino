@@ -182,6 +182,7 @@
  */
 
 #include <SdFat.h> //We do not use the built-in SD.h file because it calls Serial.print
+#include <SdVolume.h> //deprecated
 #include <SerialPort.h> //This is a new/beta library written by Bill Greiman. You rock Bill!
 #include <EEPROM.h>
 
@@ -1299,7 +1300,7 @@ void command_shell(void)
         continue;
 
       SdFile newDirectory;
-      if (!newDirectory.makeDir(&currentDirectory, command_arg)) {
+      if (!newDirectory.mkdir(&currentDirectory, command_arg)) {
         if ((feedback_mode & EXTENDED_INFO) > 0)
         {
           NewSerial.print(F("error creating directory: "));
@@ -1345,7 +1346,7 @@ void command_shell(void)
       {
         tmp_var = 0;
         if (tempFile.isDir() || tempFile.isSubDir())
-          tmp_var = tempFile.rmDir();
+          tmp_var = tempFile.rmdir();
         else
         {
           tempFile.close();
@@ -1372,7 +1373,7 @@ void command_shell(void)
       {
         if (!tempFile.isDir() && !tempFile.isSubDir()) // Remove only files
         {
-          if (tempFile.getFilename(fname)) // Get the filename of the object we're looking at
+          if (tempFile.getSFN(fname)) // Get the filename of the object we're looking at
           {
             if (wildcmp(command_arg, fname))  // See if it matches the wildcard
             {
@@ -2481,7 +2482,7 @@ byte lsPrintNext(SdFile * theDir, char * cmdStr, byte flags, byte indent)
   // Find next available object to display in the specified directory
   while ((open_stat = tempFile.openNext(theDir, O_READ)))
   {
-    if (tempFile.getFilename(fname)) // Get the filename of the object we're looking at
+    if (tempFile.getSFN(fname)) // Get the filename of the object we're looking at
     {
       if (tempFile.isDir() || tempFile.isFile() || tempFile.isSubDir())
       {

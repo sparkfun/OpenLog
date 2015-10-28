@@ -120,6 +120,7 @@
  */
 
 #include <SdFat.h> //We do not use the built-in SD.h file because it calls Serial.print
+#include <SdVolume.h> //deprecated
 #include <SerialPort.h> //This is a new/beta library written by Bill Greiman. You rock Bill!
 #include <EEPROM.h>
 
