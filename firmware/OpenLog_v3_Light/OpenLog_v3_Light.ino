@@ -120,6 +120,7 @@
  */
 
 #include <SdFat.h> //We do not use the built-in SD.h file because it calls Serial.print
+#include <SdVolume.h> //deprecated
 #include <SerialPort.h> //This is a new/beta library written by Bill Greiman. You rock Bill!
 #include <EEPROM.h>
 
@@ -421,6 +422,12 @@ void seqlog(void)
   }
 
   seqFile.close(); //Close this new file we just opened
+
+  //Reset newlog count
+  if(EEPROM.read(LOCATION_FILE_NUMBER_LSB)!=0x0 | EEPROM.read(LOCATION_FILE_NUMBER_MSB)!=0x0){
+    EEPROM.write(LOCATION_FILE_NUMBER_LSB, 0x0);
+    EEPROM.write(LOCATION_FILE_NUMBER_MSB, 0x0);
+  }
 
   append_file(sequentialFileName); 
 }
