@@ -11,7 +11,11 @@ License Information
 
 The hardware design and firmware are released under [Creative Commons Share-alike 3.0](http://creativecommons.org/licenses/by-sa/3.0/).  
 The FAT16/FAT32 firmware was originally designed by Roland Riegel and is released under [GPL v2](http://www.gnu.org/licenses/gpl-2.0.html).  
+
+Feel free to use, distribute, and sell varients of OpenLog. All we ask is that you include attribution of 'Based on OpenLog by SparkFun'.
+
 OpenLog v2.0 and above uses sdfatlib written by Bill Greiman and is released under [GPL v3](http://www.gnu.org/licenses/gpl-3.0.html).  
+
 The OpenLog firmware was created by SparkFun Electronics, and is open source so please feel free to do anything you want with it; 
 you buy me a beer if you use this and we meet someday ([Beerware license](http://en.wikipedia.org/wiki/Beerware)).
 
@@ -24,9 +28,10 @@ Repository Contents
 * **/Fritzing** - Fritzing image showing the connections between the OpenLog and an FTDI Basic
 * **/Hardware** - Hardware design files for the OpenLog PCB. These files were designed in Eagle CAD.
 
-
 Version History
 ---------------
+
+For a full view of changes please see the [changelog]. 
 
 OpenLog v1 is stable but only supports FAT16 and up to 2GB.  
 
@@ -56,3 +61,4 @@ OpenLog v3 is stable, supports FAT32 cards up to 64GB and supports higher record
 * **v3.1**  Better handling of recording during power loss.
 * **v3.2**  Freed up RAM for larger RX ring buffer. Added support for wildcards and ability to ignore emergency override.
 * **v3.3**  Added ability to ignore escape character checking and corrected incremental log naming.
+* **v4.0**  Re-worked to be compatible with Arduino v1.6.x. Freed RAM to increase RX buffer size.
