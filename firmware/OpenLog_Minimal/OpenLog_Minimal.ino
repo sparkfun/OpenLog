@@ -33,10 +33,9 @@
 // port 0, 1024 byte RX buffer, 0 byte TX buffer
 SerialPort<0, 1024, 0> NewSerial;
 
-
 //Debug turns on (1) or off (0) a bunch of verbose debug statements. Normally use (0)
-#define DEBUG  1
-//#define DEBUG  0
+//#define DEBUG  1
+#define DEBUG  0
 
 #define SD_CHIP_SELECT 10 //On OpenLog this is pin 10
 
@@ -62,10 +61,10 @@ long setting_uart_speed = 115200;
 
 //Handle errors by printing the error type and blinking LEDs in certain way
 //The function will never exit - it loops forever inside blinkError
-void systemError(byte error_type)
+void systemError(byte errorType)
 {
   NewSerial.print(F("Error "));
-  switch (error_type)
+  switch (errorType)
   {
     case ERROR_CARD_INIT:
       NewSerial.print(F("card.init"));
@@ -123,10 +122,7 @@ void setup(void)
 
 void loop(void)
 {
-  newLog();
-  NewSerial.println("Holding");
-  while(1);
-  //appendFile(newLog()); //Append the file name that newlog() returns
+  appendFile(newLog()); //Append the file name that newlog() returns
 }
 
 //Log to a new file everytime the system boots
@@ -171,20 +167,12 @@ char* newLog(void)
 
   //Search for next available log spot
   static char newFileName[13];
-  sd.chdir();
-  
   while(1)
   {
     sprintf_P(newFileName, PSTR("LOG%05d.TXT"), newFileNumber); //Splice the new file number into this file name
 
-    NewSerial.print(F("Checking "));
-    NewSerial.println(newFileName);
-
     //If we are able to create this file, then it didn't exist, we're good, break
     if (newFile.open(newFileName, O_CREAT | O_EXCL | O_WRITE)) break;
-
-    NewSerial.print(F("Found "));
-    NewSerial.println(newFileName);
 
     //If file exists, see if empty. If so, use it.
     if (newFile.open(newFileName, O_READ))
@@ -218,9 +206,6 @@ char* newLog(void)
     EEPROM.write(LOCATION_FILE_NUMBER_MSB, msb); // MSB
 
 #if DEBUG
-  NewSerial.print(F("newFileNumber: "));
-  NewSerial.println(newFileNumber);
-  
   NewSerial.print(F("Created new file: "));
   NewSerial.println(newFileName);
 #endif
@@ -320,18 +305,4 @@ void toggleLED(byte pinNumber)
 {
   if (digitalRead(pinNumber)) digitalWrite(pinNumber, LOW);
   else digitalWrite(pinNumber, HIGH);
-}
-
-//End core system functions
-//=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
-
-//A rudimentary way to convert a string to a long 32 bit integer
-//Used by the read command, in command shell and baud from the system menu
-uint32_t strtolong(const char* str)
-{
-  uint32_t l = 0;
-  while (*str >= '0' && *str <= '9')
-    l = l * 10 + (*str++ - '0');
-
-  return l;
 }

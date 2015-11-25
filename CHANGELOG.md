@@ -3,12 +3,16 @@ All notable changes to this project will be documented in this file. We'll also 
  
 ## [4.0] - November 23 2015 
 
-26,734 bytes compiled
+27,046 bytes compiled
 
-Welcome to version 4! Now compiles under Arduino v1.6.x! Worked on issue #168. Fixed issue #178. Thanks @jremington! Now works with Bill's latest [SD lib](https://github.com/greiman/SdFat-beta).
+Welcome to version 4! Now compiles under Arduino v1.6.x! Thanks @owenduffy for getting OpenLog ported to the new SdFatLib.
+
+Worked on issue #168. Fixed issue #178. Thanks @jremington! Now works with Bill's latest [SD lib](https://github.com/greiman/SdFat-beta).
 
 [Added] Escape character sequences are now removed from logs. If you hit ctrl+z three times you'll drop to the command shell and the three escape characters will not be recorded to the log.
+
 [Removed] The pwd command has been removed from the command shell. This *shouldn't* effect anyone but you should know.
+
 [Removed] The sync command has been removed from the command shell. This *shouldn't* effect anyone but you should know.
 
 Fixed a bad bug found by @ystark. Thank you! New file name array is now correctly defined as static.
