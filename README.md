@@ -22,8 +22,9 @@ you buy me a beer if you use this and we meet someday ([Beerware license](http:/
 Repository Contents
 -------------------
 * **/Firmware** 
-    * OpenLog_v3 - Firmware that ships with OpenLog
-    * OpenLog_v3_Light - Alternative version to allow for larger buffers
+	* OpenLog - Firmware that ships with OpenLog. '?' command will show the version loaded onto a unit.
+	* OpenLog_Light - Used for high-speed logging. By removing the menu and command mode the receive buffer is increased.
+	* OpenLog_Minimal - Highest speed logging. Baud rate must be set in code and uploaded. Hardest, most advanced, and best at high-speed logging.
     * Examples - Example Arduino code for controlling and testing OpenLog
 * **/Fritzing** - Fritzing image showing the connections between the OpenLog and an FTDI Basic
 * **/Hardware** - Hardware design files for the OpenLog PCB. These files were designed in Eagle CAD.
@@ -31,13 +32,15 @@ Repository Contents
 Version History
 ---------------
 
-For a full view of changes please see the [changelog]. 
+For a full view of changes please see the [changelog](https://github.com/sparkfun/OpenLog/blob/master/CHANGELOG.md). 
 
-OpenLog v1 is stable but only supports FAT16 and up to 2GB.  
+OpenLog v4 is refactored with better RAM utilization for better performance at higher record speeds (115200/57600).
+
+OpenLog v3 is stable, supports FAT32 cards up to 64GB and supports higher record speeds (115200/57600).
 
 OpenLog v2 is a bit buggy but supports FAT32 and SD cards up to 16GB.  
 
-OpenLog v3 is stable, supports FAT32 cards up to 64GB and supports higher record speeds (115200/57600).
+OpenLog v1 is stable but only supports FAT16 and up to 2GB.  
 
 * **v1.0**  Buggy initial release
 * **v1.1**  Small changes to system settings and EEPROM storage.
