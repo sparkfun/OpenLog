@@ -337,7 +337,7 @@ void calcTestTime(boolean printIt)
 
   testTimeSeconds = loopTimeSeconds + totalDelaySeconds;
 
-  testTimeSeconds *= settingTestNumber; //Across the multiple tests\
+  testTimeSeconds *= settingTestNumber; //Across the multiple tests
 }
 
 void numberOfTests_menu()

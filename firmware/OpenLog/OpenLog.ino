@@ -69,13 +69,20 @@
 #include <EEPROM.h>
 #include <FreeStack.h> //Allows us to print the available stack/RAM size
 
-SerialPort<0, 850, 0> NewSerial;
+SerialPort<0, 512, 0> NewSerial;
 //<port #, RX buffer size, TX buffer size>
-//This is a very important buffer declaration. This sets the <port #, rx size, tx size>. We set
-//the TX buffer to zero because we will be spending most of our time needing to buffer the incoming (RX) characters.
-//1024/128 failed
-//800/128 works with full command set
-//900/128 works ok - limit 2 sub dirs, goes pretty haywire when doing sub directories
+//We set the TX buffer to zero because we will be spending most of our 
+//time needing to buffer the incoming (RX) characters.
+
+//This is the array within the append file routine
+//We have to keep SerialPort buffer sizes reasonable so that when we drop to
+//the command shell we have RAM available for the various commands like append
+#define LOCAL_BUFF_SIZE 256
+//512/256 shell works, 5/5 logs passed
+//800/128 shell works, 3/5 logs passed
+//672/256 shell works, 2/5 logs passed
+//722/256 shell fails
+//850/128 shell fails
 
 #include <avr/sleep.h> //Needed for sleep_mode
 #include <avr/power.h> //Needed for powering down perihperals such as the ADC/TWI and Timers
@@ -297,12 +304,25 @@ char* newLog(void)
   }
 
   //If we made it this far, everything looks good - let's start testing to see if our file number is the next available
+#if DEBUG
+  NewSerial.print(F("Found file number: "));
+  NewSerial.println(newFileNumber);
+#endif
+
+  //There is a weird EEPROM power-up glitch that causes the newFileNumber to advance
+  //arbitrarily. This fixes that problem.
+  if(newFileNumber > 0) newFileNumber--;
 
   //Search for next available log spot
   static char newFileName[13]; //Bug fix from ystark's pull request: https://github.com/sparkfun/OpenLog/pull/189
   while (1)
   {
     sprintf_P(newFileName, PSTR("LOG%05u.TXT"), newFileNumber); //Splice the new file number into this file name
+
+    // O_CREAT - create the file if it does not exist
+    // O_APPEND - seek to the end of the file prior to each write
+    // O_WRITE - open for write
+    // O_EXCL - if O_CREAT and O_EXCEL are set, open() shall fail if file exists 
 
     //Try to open file, if it opens (file doesn't exist), then break
     if (newFile.open(newFileName, O_CREAT | O_EXCL | O_WRITE)) break;
@@ -340,6 +360,9 @@ char* newLog(void)
     EEPROM.write(LOCATION_FILE_NUMBER_MSB, msb); // MSB
 
 #if DEBUG
+  NewSerial.print(F("Stored file number: "));
+  NewSerial.println(newFileNumber);
+
   NewSerial.print(F("Created new file: "));
   NewSerial.println(newFileName);
 #endif
@@ -395,7 +418,6 @@ byte appendFile(char* fileName)
 
   //This is the 2nd buffer. It pulls from the larger Serial buffer as quickly as possible.
   //The built-in Arduino serial buffer is 64 bytes: https://www.arduino.cc/en/Serial/Available
-  const byte LOCAL_BUFF_SIZE = 128;
   byte localBuffer[LOCAL_BUFF_SIZE];
 
   byte checkedSpot;
