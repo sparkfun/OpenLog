@@ -28,11 +28,10 @@
 byte ledPin =  13; //Status LED connected to digital pin 13
 byte resetOpenLog = 8;
 
-
-int settingTests = 10;
+int settingLoops = 10;
 long settingBaudRate = 115200;
 int settingWriteDelay = 0; //Number of miliseconds between strings sent
-int settingNumberOfLogs = 5; //Run these settings across 5 logs, run 5 tests
+int settingTestNumber = 5; //Run these settings across 5 logs, run 5 tests
 
 float testTimeSeconds;
 long testSizeCharacters;
@@ -44,7 +43,6 @@ const char testString[] = ":abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ
 int testStringSize = (sizeof(testString) - 1) + 3; 
 
 char testFile[] = "testfile.txt";
-
 
 SoftwareSerial TestSuite(6, 7); // RX, TX
 
@@ -90,13 +88,13 @@ void loop()
   TestSuite.println(settingBaudRate);
 
   TestSuite.print("2) Loops to run: ");
-  TestSuite.println(settingTests);
+  TestSuite.println(settingLoops);
 
   TestSuite.print("3) Delay between sending each test string: ");
   TestSuite.println(settingWriteDelay);
 
   TestSuite.print("4) Number of tests: ");
-  TestSuite.println(settingNumberOfLogs);
+  TestSuite.println(settingTestNumber);
 
   TestSuite.println("r) Run test with current settings");
   TestSuite.println("T) Test connection to OpenLog");
@@ -123,7 +121,7 @@ void loop()
   }
   else if (command == '4')
   {
-    //numberOfTests_menu();
+    numberOfTests_menu();
   }
   else if (command == 'r')
   {
@@ -153,12 +151,12 @@ void loop()
       TestSuite.println();
       TestSuite.println("Beginning test...");
   
-      for(int x = 0 ; x < settingNumberOfLogs ; x++)
+      for(int x = 0 ; x < settingTestNumber ; x++)
       {
         TestSuite.print("Running test ");
         TestSuite.print(x);
         TestSuite.print(" out of ");
-        TestSuite.println(settingNumberOfLogs);
+        TestSuite.println(settingTestNumber);
   
         runTest(); //Each time we call this it resets OpenLog and creates new log
 
@@ -206,7 +204,7 @@ void runTest()
   long startTime = millis();
 
   //Each test is 100 lines. 10 tests is 1000 lines (11,000 characters)
-  for (int numofTests = 0 ; numofTests < settingTests ; numofTests++)
+  for (int numofTests = 0 ; numofTests < settingLoops ; numofTests++)
   {
     //This loop will print 100 lines of 110 characters each
     for (int k = 33; k < 43 ; k++)
@@ -233,7 +231,7 @@ void runTest()
     }
   } //End numofTests loop
 
-  unsigned long totalCharacters = (long)settingTests * 100 * testStringSize;
+  unsigned long totalCharacters = (long)settingLoops * 100 * testStringSize;
 
   TestSuite.print("Characters pushed: ");
   TestSuite.println(totalCharacters);
@@ -324,7 +322,7 @@ void calcTestTime(boolean printIt)
     TestSuite.println(" microseconds");
   }*/
 
-  testSizeCharacters = (long)settingTests * testStringSize * 100; //Each test is 100 lines
+  testSizeCharacters = (long)settingLoops * testStringSize * 100; //Each test is 100 lines
 
   if (printIt)
   {
@@ -335,9 +333,48 @@ void calcTestTime(boolean printIt)
 
   float loopTimeSeconds = testSizeCharacters * microSecondsPerByte / (float)1000000; //145,000 * 173 = 25,085,000 / 1,000,000 = 25 seconds
 
-  float totalDelaySeconds = (100 * settingWriteDelay) * settingTests / 1000; //Each time we run a 100 line test we will have 100 times the writeDelay
+  float totalDelaySeconds = (100 * settingWriteDelay) * settingLoops / 1000; //Each time we run a 100 line test we will have 100 times the writeDelay
 
   testTimeSeconds = loopTimeSeconds + totalDelaySeconds;
+
+  testTimeSeconds *= settingTestNumber; //Across the multiple tests\
+}
+
+void numberOfTests_menu()
+{
+  long testNumber = settingTestNumber;
+
+  TestSuite.print(F("\n\rCurrent number of tests: "));
+  TestSuite.println(testNumber, DEC);
+
+  TestSuite.println(F("Enter new number of tests ('x' to exit):"));
+
+  TestSuite.print(F(">"));
+
+  //Read user input
+  char userInput[8]; //Max at 1000000
+  readLine(userInput, sizeof(userInput));
+
+  if (userInput[0] == 'x')
+  {
+    TestSuite.println(F("Exiting"));
+    return; //Look for escape character
+  }
+
+  long newTests = strtolong(userInput); //Convert this string to a long
+
+  if (newTests < 1 || newTests > 1000)
+  {
+    TestSuite.println(F("Out of bounds"));
+  }
+  else
+  {
+    TestSuite.print(F("Tests set to "));
+    TestSuite.println(newTests);
+
+    settingTestNumber = newTests;
+  }
+  
 }
 
 void baud_menu()
@@ -354,7 +391,7 @@ void baud_menu()
 
   //Read user input
   char newBaud[8]; //Max at 1000000
-  read_line(newBaud, sizeof(newBaud));
+  readLine(newBaud, sizeof(newBaud));
 
   if (newBaud[0] == 'x')
   {
@@ -393,7 +430,7 @@ void delay_menu()
 
   //Read user input
   char newDelay[8]; //Max at 1000000
-  read_line(newDelay, sizeof(newDelay));
+  readLine(newDelay, sizeof(newDelay));
 
   if (newDelay[0] == 'x')
   {
@@ -420,7 +457,7 @@ void delay_menu()
 void loop_menu()
 {
   TestSuite.print("Number of loops: ");
-  TestSuite.println(settingTests, DEC);
+  TestSuite.println(settingLoops, DEC);
 
   TestSuite.println(F("Enter new number of loops ('x' to exit):"));
 
@@ -428,7 +465,7 @@ void loop_menu()
 
   //Read user input
   char newLoops[8]; //Max at 1000000
-  read_line(newLoops, sizeof(newLoops));
+  readLine(newLoops, sizeof(newLoops));
 
   if (newLoops[0] == 'x')
   {
@@ -436,16 +473,16 @@ void loop_menu()
     return; //Look for escape character
   }
 
-  settingTests = strtolong(newLoops); //Convert this string to a long
+  settingLoops = strtolong(newLoops); //Convert this string to a long
 
   TestSuite.println();
   TestSuite.print(F("New number of loops: "));
-  TestSuite.println(settingTests);
+  TestSuite.println(settingLoops);
 }
 
 
 //Reads a line until the \n enter character is found
-byte read_line(char* buffer, byte buffer_length)
+byte readLine(char* buffer, byte buffer_length)
 {
   memset(buffer, 0, buffer_length); //Clear buffer
 

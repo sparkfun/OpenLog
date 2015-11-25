@@ -3,14 +3,13 @@ All notable changes to this project will be documented in this file. We'll also 
  
 ## [4.0] - November 23 2015 
 
-26,686 bytes compiled
+26,734 bytes compiled
 
-Welcome to version 4!
- 
-## [Removed] The pwd command has been removed from the command shell. This *shouldn't* effect anyone but you should know.
-## [Removed] The sync command has been removed from the command shell. This *shouldn't* effect anyone but you should know.
+Welcome to version 4! Now compiles under Arduino v1.6.x! Worked on issue #168. Fixed issue #178. Thanks @jremington! Now works with Bill's latest [SD lib](https://github.com/greiman/SdFat-beta).
 
-Now compiles under Arduino v1.6.x! Worked on issue #168. Fixed issue #178. Thanks @jremington! Now works with Bill's latest [SD lib](https://github.com/greiman/SdFat-beta).
+[Added] Escape character sequences are now removed from logs. If you hit ctrl+z three times you'll drop to the command shell and the three escape characters will not be recorded to the log.
+[Removed] The pwd command has been removed from the command shell. This *shouldn't* effect anyone but you should know.
+[Removed] The sync command has been removed from the command shell. This *shouldn't* effect anyone but you should know.
 
 Fixed a bad bug found by @ystark. Thank you! New file name array is now correctly defined as static.
 
@@ -188,9 +187,11 @@ Testing at 57600
 * 8GB: 111000/111000, 111000/111000, 111000/111000
 * 16GB: 83890/111000, 84908/111000
 
- The 16GB card with tons of files continue to have problems but the other cards (FAT and FAT32) are acceptable. Whenever possible, use a clean, empty, freshly formatted card.
+The 16GB card with tons of files continue to have problems but the other cards (FAT and FAT32) are acceptable. Whenever possible, use a clean, empty, freshly formatted card.
  
-"rm -rf mydirectory" to remove a directory and all its files
+To remove a directory and all its files:
+
+    rm -rf mydirectory
  
 Windows 7 stores the Arduino hex file in an awful place. Something like:
 
