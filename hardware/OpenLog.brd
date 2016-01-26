@@ -1388,7 +1388,6 @@ These rules have been curated by SparkFuns DFM commitee. After doing much resear
 <via x="0.662940625" y="13.368021875" extent="1-16" drill="0.381"/>
 <via x="5.08" y="17.78" extent="1-16" drill="0.381"/>
 <via x="12.7" y="18.161" extent="1-16" drill="0.381"/>
-<via x="1.778" y="17.526" extent="1-16" drill="0.381"/>
 <via x="4.445" y="7.366" extent="1-16" drill="0.381"/>
 <via x="11.43" y="15.24" extent="1-16" drill="0.381"/>
 <contactref element="JP2" pad="1"/>
