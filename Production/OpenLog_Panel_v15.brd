@@ -7182,6 +7182,9 @@ These rules have been curated by SparkFuns DFM commitee. After doing much resear
 <element name="E$7" library="SparkFun-Aesthetics" package="FIDUCIAL-1X2" value="" x="196.723" y="98.552" rot="R180"/>
 <element name="E$8" library="SparkFun-Aesthetics" package="FIDUCIAL-1X2" value="" x="196.723" y="10.668"/>
 <element name="E$1" library="SparkFun-Retired" package="FIDUCIAL-1.5X3" value="" x="4.572" y="10.922"/>
+<element name="E$2" library="SparkFun-Retired" package="FIDUCIAL-1.5X3" value="" x="4.572" y="10.922" rot="MR0"/>
+<element name="E$3" library="SparkFun-Aesthetics" package="FIDUCIAL-1X2" value="" x="196.723" y="10.668" rot="MR0"/>
+<element name="E$4" library="SparkFun-Aesthetics" package="FIDUCIAL-1X2" value="" x="196.723" y="98.552" rot="MR180"/>
 </elements>
 <signals>
 <signal name="GND" class="1">
