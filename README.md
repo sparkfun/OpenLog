@@ -1,33 +1,43 @@
-OpenLog
-=======
+SparkFun OpenLog
+================
 
-[![OpenLog](https://dlnmh9ip6v2uc.cloudfront.net/images/products/9/5/3/0/09530-01_i_ma.jpg)  
-*OpenLog (DEV-09530)*](https://www.sparkfun.com/products/9530)
+![OpenLog](https://dlnmh9ip6v2uc.cloudfront.net/images/products/9/5/3/0/09530-01_i_ma.jpg)  
+
+[*OpenLog (DEV-09530)*](https://www.sparkfun.com/products/9530)
 
 OpenLog is an open source data logger that works over a simple serial connection and supports microSD cards up to 64GB. 
+
+
+Repository Contents
+-------------------
+* **/Documentation** - Data sheets, additional product information
+* **/Firmware** - Example sketches for the OpenLog, and for an Arduino connected to the OpenLog.
+* **/Hardware** - Hardware design files for the OpenLog PCB. These files were designed in Eagle CAD.
+* **/Libraries** - Libraries for use with the OpenLog.
+* **/Production** - Production panel files (.brd)
+
+Documentation
+--------------
+* **[Hookup Guide](https://learn.sparkfun.com/tutorials/openlog-hookup-guide)** - Basic hookup guide for the OpenLog.
+* **[SparkFun Fritzing repo](https://github.com/sparkfun/Fritzing_Parts)** - Fritzing diagrams for SparkFun products.
+* **[SparkFun 3D Model repo](https://github.com/sparkfun/3D_Models)** - 3D models of SparkFun products. 
+* **[SparkFun Graphical Datasheets](https://github.com/sparkfun/Graphical_Datasheets)** -Graphical Datasheets for various SparkFun products.
+
 
 License Information
 -------------------
 
-The hardware design and firmware are released under [Creative Commons Share-alike 3.0](http://creativecommons.org/licenses/by-sa/3.0/).  
-The FAT16/FAT32 firmware was originally designed by Roland Riegel and is released under [GPL v2](http://www.gnu.org/licenses/gpl-2.0.html).  
+This product is _**open source**_! 
 
-Feel free to use, distribute, and sell varients of OpenLog. All we ask is that you include attribution of 'Based on OpenLog by SparkFun'.
+Please review the LICENSE.md file for license information. 
 
-OpenLog v2.0 and above uses sdfatlib written by Bill Greiman and is released under [GPL v3](http://www.gnu.org/licenses/gpl-3.0.html).  
+If you have any questions or concerns on licensing, please contact techsupport@sparkfun.com.
 
-The OpenLog firmware was created by SparkFun Electronics, and is open source so please feel free to do anything you want with it; 
-you buy me a beer if you use this and we meet someday ([Beerware license](http://en.wikipedia.org/wiki/Beerware)).
+Distributed as-is; no warranty is given.
 
-Repository Contents
--------------------
-* **/Firmware** 
-	* OpenLog - Firmware that ships with OpenLog. '?' command will show the version loaded onto a unit.
-	* OpenLog_Light - Used for high-speed logging. By removing the menu and command mode the receive buffer is increased.
-	* OpenLog_Minimal - Highest speed logging. Baud rate must be set in code and uploaded. Hardest, most advanced, and best at high-speed logging.
-    * Examples - Example Arduino code for controlling and testing OpenLog
-* **/Fritzing** - Fritzing image showing the connections between the OpenLog and an FTDI Basic
-* **/Hardware** - Hardware design files for the OpenLog PCB. These files were designed in Eagle CAD.
+- Your friends at SparkFun.
+
+_SDFatLib-beta and SerialPort are written by Bill Greiman, and released under GPLv3._
 
 Version History
 ---------------

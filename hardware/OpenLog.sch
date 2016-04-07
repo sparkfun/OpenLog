@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!DOCTYPE eagle SYSTEM "eagle.dtd">
-<eagle version="7.3.0">
+<eagle version="7.5.0">
 <drawing>
 <settings>
 <setting alwaysvectorfont="no"/>
@@ -152,7 +152,7 @@
 <layer number="254" name="cooling" color="7" fill="1" visible="yes" active="yes"/>
 <layer number="255" name="routoute" color="7" fill="1" visible="no" active="yes"/>
 </layers>
-<schematic xreflabel="%F%N/%S" xrefpart="/%S.%C%R">
+<schematic xreflabel="%F%N/%S" xrefpart="/%S">
 <libraries>
 <library name="SparkFun">
 <packages>
@@ -10129,7 +10129,7 @@ You are welcome to use this library for commercial purposes. For attribution, we
 <text x="2.54" y="5.08" size="1.778" layer="97">To connect OpenLog to an FTDI basic, you will need to swap
  TX and RX lines between boards.</text>
 <text x="238.76" y="7.62" size="2.54" layer="94">V15</text>
-<text x="165.354" y="11.43" size="2.54" layer="94">N. Seidle</text>
+<text x="170.434" y="11.43" size="2.54" layer="94">N. Seidle</text>
 <text x="148.844" y="7.112" size="2.54" layer="94">Revised by: Patrick Alberts, Pete Lewis</text>
 <text x="2.54" y="28.702" size="1.778" layer="97">0.8mm Thin PCB</text>
 <text x="2.54" y="177.8" size="2.54" layer="97">Power Circuit:</text>
@@ -10193,14 +10193,14 @@ You are welcome to use this library for commercial purposes. For attribution, we
 <instance part="P+2" gate="G$1" x="33.02" y="88.9"/>
 <instance part="GND3" gate="1" x="33.02" y="53.34"/>
 <instance part="U1" gate="U$1" x="203.2" y="114.3"/>
-<instance part="LOGO1" gate="G$1" x="121.92" y="12.7"/>
+<instance part="LOGO1" gate="G$1" x="137.16" y="2.54"/>
 <instance part="FID1" gate="G$1" x="246.38" y="33.02"/>
 <instance part="FID2" gate="G$1" x="241.3" y="33.02"/>
 <instance part="GND6" gate="1" x="121.92" y="60.96"/>
 <instance part="TP1" gate="G$1" x="66.04" y="157.48" smashed="yes">
 <attribute name="NAME" x="66.04" y="159.512" size="1.778" layer="95"/>
 </instance>
-<instance part="LOGO2" gate="G$1" x="106.68" y="20.32"/>
+<instance part="LOGO2" gate="G$1" x="124.46" y="10.16"/>
 <instance part="FID3" gate="G$1" x="246.38" y="27.94"/>
 <instance part="FID4" gate="G$1" x="241.3" y="27.94"/>
 <instance part="TP2" gate="G$1" x="116.84" y="152.4" smashed="yes" rot="R180">
