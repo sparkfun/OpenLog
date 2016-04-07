@@ -1,5 +1,5 @@
 OpenLog Firmware
-=======
+=================
 
 * OpenLog - Firmware that ships with OpenLog. '?' command will show the version loaded onto a unit.
 * OpenLog_Light - Used for high-speed logging. By removing the menu and command mode the receive buffer is increased.

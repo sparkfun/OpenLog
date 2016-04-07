@@ -37,55 +37,68 @@
  
  */
 
-int statLED =  13; //Status LED connected to digital pin 13
+int ledPin =  13; //Status LED connected to digital pin 13
 
 void setup() 
 { 
-  pinMode(statLED, OUTPUT);     
+  pinMode(ledPin, OUTPUT);     
 
   //Serial.begin(9600); //9600bps is default for OpenLog
   //Serial.begin(57600); //Much faster serial, used for testing buffer overruns on OpenLog
   Serial.begin(115200); //Much faster serial, used for testing buffer overruns on OpenLog
 
   delay(1000); //Wait a second for OpenLog to init
-  
-  randomSeed(analogRead(A0)); //Feed the random number generator
 
-  //const char* fileHeader = "OpenLong Binary Test";
-  //Serial.print(fileHeader);
-  
-  long lastBlink = millis();
-  
-  long bytesToSend = 200000;
-  for(long x = 0 ; x < bytesToSend ; x++)
+  Serial.println(); 
+  Serial.println("Run OpenLog Test"); 
+
+  int testAmt = 30;
+  //At 9600, testAmt of 4 takes about 1 minute, 10 takes about 3 minutes
+  //At 57600, testAmt of 10 takes about 1 minute, 40 takes about 5 minutes
+  //At 115200, testAmt of 30 takes about 1 minute
+  //testAmt of 10 will push 111,000 characters/bytes. With header and footer strings, total is 111,052
+
+  //Each test is 100 lines. 10 tests is 1000 lines (11,000 characters)
+  for(int numofTests = 0 ; numofTests < testAmt ; numofTests++)
   {
-    Serial.write(random(0, 256)); //Write a binary number 0 to 255 to OpenLog
-    
-    if(millis() - lastBlink > 2000)
+    //This loop will print 100 lines of 110 characters each
+    for(int k = 33; k < 43 ; k++)
     {
-      lastBlink = millis();
-      if(digitalRead(statLED) == LOW)
-        digitalWrite(statLED, HIGH);
-      else
-        digitalWrite(statLED, LOW);
-    }
-  }
+      //Print one line of 110 characters with marker in the front (markers go from '!' to '*')
+      Serial.write(k); //Print the ASCII value directly: ! then " then #, etc
+      Serial.println(":abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-!#");
+      //delay(50);
 
-  /*unsigned long totalCharacters = (long)testAmt * 100 * 110;
+      //Then print 9 lines of 110 characters with new line at the end of the line
+      for(int i = 1 ; i < 10 ; i++)
+      {
+        Serial.print(i, DEC);
+        Serial.println(":abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-!#");
+        //delay(50);
+      }  
+
+      if(digitalRead(ledPin) == 0) //Turn the status LED on/off as we go
+        digitalWrite(ledPin, HIGH);
+      else
+        digitalWrite(ledPin, LOW);
+    }
+  } //End numofTests loop
+
+  unsigned long totalCharacters = (long)testAmt * 100 * 110;
   Serial.print("Characters pushed: ");
   Serial.println(totalCharacters);  
   Serial.print("Time taken (s): ");
   Serial.println(millis()/1000);
-  Serial.println("Done!");*/
+  Serial.println("Done!");
 } 
 
 void loop() 
 { 
   //Blink the Status LED because we're done!
-  digitalWrite(statLED, HIGH);
-  delay(200);
-  digitalWrite(statLED, LOW);
-  delay(200);
+  digitalWrite(ledPin, HIGH);
+  delay(100);
+  digitalWrite(ledPin, LOW);
+  delay(1000);
 } 
 
 
