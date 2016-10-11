@@ -77,7 +77,7 @@ SerialPort<0, 512, 0> NewSerial;
 //This is the array within the append file routine
 //We have to keep SerialPort buffer sizes reasonable so that when we drop to
 //the command shell we have RAM available for the various commands like append
-#define LOCAL_BUFF_SIZE 256
+#define LOCAL_BUFF_SIZE 255 //Must not be larger than charsToRecord variable size which is currently a byte
 //512/256 shell works, 5/5 logs passed
 //800/128 shell works, 3/5 logs passed
 //672/256 shell works, 2/5 logs passed
@@ -751,8 +751,8 @@ void readConfigFile(void)
   int len;
   byte settingsString[CFG_LENGTH]; //"115200,103,14,0,1,1,0\r" = 115200 bps, escape char of ASCII(103), 14 times, new log mode, verbose on, echo on, ignore RX false.
   for (len = 0 ; len < CFG_LENGTH ; len++) {
-    if ( (c = configFile.read()) < 0) break; //We've reached the end of the file
-    if (c == '\r') break; //Bail if we hit the end of this string
+    c = configFile.read();
+    if (!(c == ',' || (c >= '0' && c <= '9'))) break; //Bail if we hit a non-numeric or non-comma character
     settingsString[len] = c;
   }
 
@@ -785,7 +785,7 @@ void readConfigFile(void)
   for (i = 0 ; i < len; i++)
   {
     //Pick out one setting from the line of text
-    for (j = 0 ; settingsString[i] != ',' && i < len && j < 6 ; )
+    for (j = 0 ; settingsString[i] != ',' && i < len && j < 7 ; )
     {
       newSettingString[j] = settingsString[i];
       i++;
