@@ -17,9 +17,16 @@
  * along with the Arduino SerialPort Library.  If not, see
  * <http://www.gnu.org/licenses/>.
  */
+/**
+ * @file
+ * @brief Serial Port class
+ */
 #include <SerialPort.h>
 //------------------------------------------------------------------------------
-/** \return the number of bytes in the ring buffer */
+/** @return The number of bytes in the ring buffer.
+ *
+ * @note This function must not be called with interrupts disabled.
+ */
 int SerialRingBuffer::available() {
   uint8_t s = SREG;
   cli();
@@ -28,7 +35,10 @@ int SerialRingBuffer::available() {
   return n < 0 ? size_ + n : n;
 }
 //------------------------------------------------------------------------------
-/** Discard all data in the ring buffer. */
+/** Discard all data in the ring buffer.
+ *
+ * @note This function must not be called with interrupts disabled.
+ */
 void SerialRingBuffer::flush() {
   uint8_t s = SREG;
   cli();
@@ -36,9 +46,10 @@ void SerialRingBuffer::flush() {
   SREG = s;
 }
 //------------------------------------------------------------------------------
-/** get the next byte
- * \param[in] b location for the returned byte
- * \return true if a byte was returned or false if the ring buffer is empty
+/** Get the next byte from the ring buffer.
+ *
+ * @param[in] b location for the returned byte
+ * @return @c true if a byte was returned or @c false if the ring buffer is empty
  */
 bool SerialRingBuffer::get(uint8_t* b) {
   buf_size_t t = tail_;
@@ -50,12 +61,13 @@ bool SerialRingBuffer::get(uint8_t* b) {
 //------------------------------------------------------------------------------
 /**
  * Get the maximum number of contiguous bytes from the ring buffer
- * with one call to memcpy. Do not use this function with interrupts
- * disabled.
+ * with one call to memcpy.
  *
- * \param[in] b pointer to data
- * \param[in] n number of bytes to transfer from the ring buffer
- * \return number of bytes transferred
+ * @note This function must not be called with interrupts disabled.
+ *
+ * @param[in] b Pointer to the data.
+ * @param[in] n Number of bytes to transfer from the ring buffer.
+ * @return Number of bytes transferred.
  */
 SerialRingBuffer::buf_size_t SerialRingBuffer::get(uint8_t* b, buf_size_t n) {
   buf_size_t nr;
@@ -77,9 +89,9 @@ SerialRingBuffer::buf_size_t SerialRingBuffer::get(uint8_t* b, buf_size_t n) {
   return nr;
 }
 //------------------------------------------------------------------------------
-/** initialize the ring buffer
- * \param[in] b buffer for data
- * \param[in] s size of the buffer
+/** Initialize the ring buffer.
+ * @param[in] b Buffer for the data.
+ * @param[in] s Size of the buffer.
  */
 void SerialRingBuffer::init(uint8_t* b, buf_size_t s) {
   buf_ = b;
@@ -87,20 +99,22 @@ void SerialRingBuffer::init(uint8_t* b, buf_size_t s) {
   head_ = tail_ = 0;
 }
 //------------------------------------------------------------------------------
-/** peek at the next byte in the ring buffer
- * \return the next byte that would ber read or -1 if the ring buffer is empty
+/** Peek at the next byte in the ring buffer.
+ * @return The next byte that would be read or -1 if the ring buffer is empty.
  */
 int SerialRingBuffer::peek() {
   return empty() ? -1 : buf_[tail_];
 }
 //------------------------------------------------------------------------------
-/** put a byte into the ring buffer
- * \param[in] b the byte
- * \return true if byte was transferred or false if the ring buffer is full
+/** Put a byte into the ring buffer.
+ *
+ * @param[in] b the byte
+ * @return @c true if byte was transferred or
+ *         @c false if the ring buffer is full.
  */
 bool SerialRingBuffer::put(uint8_t b) {
   buf_size_t h = head_;
-  // OK to store here even if ring is full
+  // OK to store here even if ring is full.
   buf_[h++] = b;
   if (h >= size_) h = 0;
   if (h == tail_) return false;
@@ -109,12 +123,14 @@ bool SerialRingBuffer::put(uint8_t b) {
 }
 //------------------------------------------------------------------------------
 /**
- * Put the maximum number of contiguous bytes into the ring buffer
+ * Put the maximum number of contiguous bytes into the ring buffer.
  * with one call to memcpy.
  *
- * \param[in] b pointer to data
- * \param[in] n number of bytes to transfer to the ring buffer
- * \return number of bytes transferred
+ * @note This function must not be called with interrupts disabled.
+ *
+ * @param[in] b pointer to data.
+ * @param[in] n number of bytes to transfer to the ring buffer.
+ * @return number of bytes transferred.
  */
 SerialRingBuffer::buf_size_t
   SerialRingBuffer::put(const uint8_t* b, buf_size_t n) {
@@ -137,12 +153,14 @@ SerialRingBuffer::buf_size_t
 }
 //------------------------------------------------------------------------------
 /**
- * Put the maximum number of contiguous bytes into the ring buffer
+ * Put the maximum number of contiguous bytes into the ring buffer.
  * with one call to memcpy.
  *
- * \param[in] b pointer to data
- * \param[in] n number of bytes to transfer to the ring buffer
- * \return number of bytes transferred
+ * @note This function must not be called with interrupts disabled.
+ *
+ * @param[in] b pointer to data.
+ * @param[in] n number of bytes to transfer to the ring buffer.
+ * @return number of bytes transferred.
  */
 SerialRingBuffer::buf_size_t SerialRingBuffer::put_P(PGM_P b, buf_size_t n) {
   cli();
@@ -190,19 +208,25 @@ inline static void rx_isr(uint8_t n) {
 // SerialRingBuffer rxbuf0;
 #if defined(USART_RX_vect)
 ISR(USART_RX_vect) {
-#elif defined(SIG_USART0_RECV)
-ISR(SIG_USART0_RECV) {
-#elif defined(SIG_UART0_RECV)
-ISR(SIG_UART0_RECV) {
-#elif defined(USART0_RX_vect)
-ISR(USART0_RX_vect) {
-#elif defined(SIG_UART_RECV)
-ISR(SIG_UART_RECV) {
-#else  // vector
-#error No ISR rx vector for UART0
-#endif  // vector
   rx_isr(0);
 }
+#elif defined(SIG_USART0_RECV)
+ISR(SIG_USART0_RECV) {
+  rx_isr(0);
+}
+#elif defined(SIG_UART0_RECV)
+ISR(SIG_UART0_RECV) {
+  rx_isr(0);
+}
+#elif defined(USART0_RX_vect)
+ISR(USART0_RX_vect) {
+  rx_isr(0);
+}
+#elif defined(SIG_UART_RECV)
+ISR(SIG_UART_RECV) {
+  rx_isr(0);
+}
+#endif  // vector USART0
 #ifdef USART1_RX_vect
 ISR(USART1_RX_vect) {
   rx_isr(1);
@@ -237,17 +261,22 @@ inline static void tx_isr(uint8_t n) {
 }
 #if defined(UART0_UDRE_vect)
 ISR(UART0_UDRE_vect) {
-#elif defined(UART_UDRE_vect)
-ISR(UART_UDRE_vect) {
-#elif defined(USART0_UDRE_vect)
-ISR(USART0_UDRE_vect) {
-#elif defined(USART_UDRE_vect)
-ISR(USART_UDRE_vect) {
-#else
-#error N0 ISR tx vector for UART0
-#endif
   tx_isr(0);
 }
+#elif defined(UART_UDRE_vect)
+ISR(UART_UDRE_vect) {
+  tx_isr(0);
+}
+#elif defined(USART0_UDRE_vect)
+ISR(USART0_UDRE_vect) {
+  tx_isr(0);
+}
+#elif defined(USART_UDRE_vect)
+ISR(USART_UDRE_vect) {
+  tx_isr(0);
+}
+#endif  // USART0 TX
+
 #ifdef USART1_UDRE_vect
 ISR(USART1_UDRE_vect) {
   tx_isr(1);
