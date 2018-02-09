@@ -1,5 +1,5 @@
 /*
- Example of reading of a large file
+ Example of reading of a large file and outputting to a different software serial port (like Bluetooth)
  By: Nathan Seidle
  SparkFun Electronics
  Date: September 22nd, 2013
