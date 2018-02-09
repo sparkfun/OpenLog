@@ -519,7 +519,7 @@ void read_system_settings(void)
   //Read whether we should use verbose responses or not
   //Default is true
   setting_verbose = EEPROM.read(LOCATION_VERBOSE);
-  if(setting_verbose != ON || setting_verbose != OFF) 
+  if(setting_verbose != ON && setting_verbose != OFF) 
   {
     setting_verbose = ON; //Reset verbose to true
     EEPROM.write(LOCATION_VERBOSE, setting_verbose);

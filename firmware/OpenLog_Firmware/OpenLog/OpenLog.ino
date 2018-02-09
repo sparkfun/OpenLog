@@ -681,7 +681,7 @@ void readSystemSettings(void)
   //Read whether we should use verbose responses or not
   //Default is true
   setting_verbose = EEPROM.read(LOCATION_VERBOSE);
-  if (setting_verbose != ON || setting_verbose != OFF)
+  if (setting_verbose != ON && setting_verbose != OFF)
   {
     setting_verbose = ON; //Reset verbose to true
     EEPROM.write(LOCATION_VERBOSE, setting_verbose);
@@ -1723,7 +1723,7 @@ byte readLine(char* buffer, byte bufferLength)
 
 void printMenu(void)
 {
-  NewSerial.println(F("OpenLog v4.0"));
+  NewSerial.println(F("OpenLog v4.1"));
   NewSerial.println(F("Basic commands:"));
   NewSerial.println(F("new <file>\t\t: Creates <file>"));
   NewSerial.println(F("append <file>\t\t: Appends text to end of <file>"));
