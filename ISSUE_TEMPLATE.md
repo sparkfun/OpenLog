@@ -1,9 +1,10 @@
 ### Subject of the issue
 Describe your issue here.
 
-### Your environment
+### Your workbench
 * What platform are you using?
 * How is the device wired to your platform?
+* How is everything being powered?
 * Are there any additional details that may help us help you?
 
 ### Steps to reproduce
