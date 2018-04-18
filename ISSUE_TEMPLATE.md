@@ -1,1 +1,16 @@
-If this is a hardware issue please provide us details including what platform you're using, how the product is wired to your platform, and any additional details that may help us help you. Please post stripped down example code demonstrating your issue to a gist.
+### Subject of the issue
+Describe your issue here.
+
+### Your environment
+* What platform are you using?
+* How is the device wired to your platform?
+* Are there any additional details that may help us help you?
+
+### Steps to reproduce
+Tell us how to reproduce this issue. Please post stripped down example code demonstrating your issue to a gist.
+
+### Expected behaviour
+Tell us what should happen
+
+### Actual behaviour
+Tell us what happens instead
