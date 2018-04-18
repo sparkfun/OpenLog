@@ -3,6 +3,7 @@ Describe your issue here.
 
 ### Your workbench
 * What platform are you using?
+* What version of the device are you using? Is there a firmware version?
 * How is the device wired to your platform?
 * How is everything being powered?
 * Are there any additional details that may help us help you?
