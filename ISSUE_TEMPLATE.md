@@ -1,0 +1,1 @@
+If this is a hardware issue please provide us details including what platform you're using, how the product is wired to your platform, and any additional details that may help us help you. Please post stripped down example code demonstrating your issue to a gist.
