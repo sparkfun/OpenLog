@@ -45,16 +45,16 @@ void setup()
 { 
   pinMode(ledPin, OUTPUT);     
 
-  //Serial.begin(9600); //9600bps is default for OpenLog
+  Serial.begin(9600); //9600bps is default for OpenLog
   //Serial.begin(57600); //Much faster serial, used for testing buffer overruns on OpenLog
-  Serial.begin(115200); //Much faster serial, used for testing buffer overruns on OpenLog
+  //Serial.begin(115200); //Much faster serial, used for testing buffer overruns on OpenLog
 
   delay(1000); //Wait a second for OpenLog to init
 
   Serial.println(); 
   Serial.println("Run OpenLog Test"); 
 
-  int testAmt = 30;
+  int testAmt = 3;
   //At 9600, testAmt of 4 takes about 1 minute, 10 takes about 3 minutes
   //At 57600, testAmt of 10 takes about 1 minute, 40 takes about 5 minutes
   //At 115200, testAmt of 30 takes about 1 minute
