@@ -1,65 +1,65 @@
 /*
- 12-3-09
- Nathan Seidle
- SparkFun Electronics
+  12-3-09
+  Nathan Seidle
+  SparkFun Electronics
 
- OpenLog hardware and firmware are released under the Creative Commons Share Alike v3.0 license.
- http://creativecommons.org/licenses/by-sa/3.0/
- Feel free to use, distribute, and sell varients of OpenLog. All we ask is that you include attribution of 'Based on OpenLog by SparkFun'.
+  OpenLog hardware and firmware are released under the Creative Commons Share Alike v3.0 license.
+  http://creativecommons.org/licenses/by-sa/3.0/
+  Feel free to use, distribute, and sell varients of OpenLog. All we ask is that you include attribution of 'Based on OpenLog by SparkFun'.
 
- OpenLog is based on the work of Bill Greiman and sdfatlib: https://github.com/greiman/SdFat-beta
+  OpenLog is based on the work of Bill Greiman and sdfatlib: https://github.com/greiman/SdFat-beta
 
- OpenLog is a simple serial logger based on the ATmega328 running at 16MHz. The whole purpose of this
- logger was to create a logger that just powered up and worked. OpenLog ships with an Arduino/Optiboot
- 115200bps serial bootloader running at 16MHz so you can load new firmware with a simple serial
- connection.
+  OpenLog is a simple serial logger based on the ATmega328 running at 16MHz. The whole purpose of this
+  logger was to create a logger that just powered up and worked. OpenLog ships with an Arduino/Optiboot
+  115200bps serial bootloader running at 16MHz so you can load new firmware with a simple serial
+  connection.
 
- OpenLog has progressed significantly over the past three years. Please see CHANGELOG.md or GitHub commits
- for a full trip down memory lane.
+  OpenLog has progressed significantly over the past three years. Please see CHANGELOG.md or GitHub commits
+  for a full trip down memory lane.
 
- OpenLog automatically works with 512MB to 64GB micro/SD cards.
+  OpenLog automatically works with 512MB to 64GB micro/SD cards.
 
- OpenLog runs at 9600bps by default. This is configurable to 1200, 2400, 4800, 9600, 19200, 38400, 57600, and 115200bps. You can alter
- all settings including baud rate and escape characters by editing config.txt found on OpenLog.
+  OpenLog runs at 9600bps by default. This is configurable to 1200, 2400, 4800, 9600, 19200, 38400, 57600, and 115200bps. You can alter
+  all settings including baud rate and escape characters by editing config.txt found on OpenLog.
 
- Type '?' to get a list of supported commands.
+  Type '?' to get a list of supported commands.
 
- During power up, you will see '12<'. '1' indicates the serial connection is established. '2' indicates
- the SD card has been successfully initialized. '<' indicates OpenLog is ready to receive serial characters.
+  During power up, you will see '12<'. '1' indicates the serial connection is established. '2' indicates
+  the SD card has been successfully initialized. '<' indicates OpenLog is ready to receive serial characters.
 
- Recording constant 115200bps datastreams are supported. Throw it everything you've got! To acheive this maximum record rate, please use the
- SD card formatter from : http://www.sdcard.org/consumers/formatter/. The fewer files on the card, the faster OpenLog is able to begin logging.
- 200 files is ok. 2GB worth of music and pictures is not.
+  Recording constant 115200bps datastreams are supported. Throw it everything you've got! To acheive this maximum record rate, please use the
+  SD card formatter from : http://www.sdcard.org/consumers/formatter/. The fewer files on the card, the faster OpenLog is able to begin logging.
+  200 files is ok. 2GB worth of music and pictures is not.
 
- To a lower dir, use 'cd ..' instead of 'cd..'.
+  To a lower dir, use 'cd ..' instead of 'cd..'.
 
- Only standard 8.3 file names are supported. "12345678.123" is acceptable. "123456789.123" is not.
+  Only standard 8.3 file names are supported. "12345678.123" is acceptable. "123456789.123" is not.
 
- All file names are pushed to upper case. "NewLog.txt" will become "NEWLOG.TXT".
+  All file names are pushed to upper case. "NewLog.txt" will become "NEWLOG.TXT".
 
- Type 'set' to enter baud rate configuration menu. Select the baud rate and press enter. You will then
- see a message 'Going to 9600bps...' or some such message. You will need to power down OpenLog, change
- your system UART settings to match the new OpenLog baud rate and then power OpenLog back up.
+  Type 'set' to enter baud rate configuration menu. Select the baud rate and press enter. You will then
+  see a message 'Going to 9600bps...' or some such message. You will need to power down OpenLog, change
+  your system UART settings to match the new OpenLog baud rate and then power OpenLog back up.
 
- If you get OpenLog stuck into an unknown baudrate, there is a safety mechanism built-in. Tie the RX pin
- to ground and power up OpenLog. You should see the LEDs blink back and forth for 2 seconds, then blink
- in unison. Now power down OpenLog and remove the RX/GND jumper. OpenLog is now reset to 9600bps.
+  If you get OpenLog stuck into an unknown baudrate, there is a safety mechanism built-in. Tie the RX pin
+  to ground and power up OpenLog. You should see the LEDs blink back and forth for 2 seconds, then blink
+  in unison. Now power down OpenLog and remove the RX/GND jumper. OpenLog is now reset to 9600bps.
 
- Please note: The preloaded Optiboot serial bootloader is 0.5k, and begins at 0x7E00 (32,256). If the code is
- larger than 32,256 bytes, you will get verification errors during serial bootloading.
+  Please note: The preloaded Optiboot serial bootloader is 0.5k, and begins at 0x7E00 (32,256). If the code is
+  larger than 32,256 bytes, you will get verification errors during serial bootloading.
 
- OpenLog regularly shuts down to conserve power. If after 0.5 seconds no characters are received, OpenLog will record 
- any unsaved characters and go to sleep. OpenLog will automatically wake up and continue logging the instant a 
- new character is received.
+  OpenLog regularly shuts down to conserve power. If after 0.5 seconds no characters are received, OpenLog will record
+  any unsaved characters and go to sleep. OpenLog will automatically wake up and continue logging the instant a
+  new character is received.
 
- 1.55mA idle
- 15mA actively writing
+  1.55mA idle
+  15mA actively writing
 
- Input voltage on VCC can be 3.3 to 12V. Input voltage on RX-I pin must not exceed 6V. Output voltage on
- TX-O pin will not be greater than 3.3V. This may cause problems with some systems - for example if your
- attached microcontroller requires 4V minimum for serial communication (this is rare).
+  Input voltage on VCC can be 3.3 to 12V. Input voltage on RX-I pin must not exceed 6V. Output voltage on
+  TX-O pin will not be greater than 3.3V. This may cause problems with some systems - for example if your
+  attached microcontroller requires 4V minimum for serial communication (this is rare).
 
- */
+*/
 
 #define __PROG_TYPES_COMPAT__ //Needed to get SerialPort.h to work in Arduino 1.6.x
 
@@ -71,7 +71,7 @@
 
 SerialPort<0, 512, 0> NewSerial;
 //<port #, RX buffer size, TX buffer size>
-//We set the TX buffer to zero because we will be spending most of our 
+//We set the TX buffer to zero because we will be spending most of our
 //time needing to buffer the incoming (RX) characters.
 
 //This is the array within the append file routine
@@ -311,7 +311,7 @@ char* newLog(void)
 
   //There is a weird EEPROM power-up glitch that causes the newFileNumber to advance
   //arbitrarily. This fixes that problem.
-  if(newFileNumber > 0) newFileNumber--;
+  if (newFileNumber > 0) newFileNumber--;
 
   //Search for next available log spot
   static char newFileName[13]; //Bug fix from ystark's pull request: https://github.com/sparkfun/OpenLog/pull/189
@@ -322,7 +322,7 @@ char* newLog(void)
     // O_CREAT - create the file if it does not exist
     // O_APPEND - seek to the end of the file prior to each write
     // O_WRITE - open for write
-    // O_EXCL - if O_CREAT and O_EXCEL are set, open() shall fail if file exists 
+    // O_EXCL - if O_CREAT and O_EXCEL are set, open() shall fail if file exists
 
     //Try to open file, if it opens (file doesn't exist), then break
     if (newFile.open(newFileName, O_CREAT | O_EXCL | O_WRITE)) break;
@@ -459,6 +459,15 @@ byte appendFile(char* fileName)
 
         power_timer0_disable(); //Shut down peripherals we don't need
         power_spi_disable();
+
+        //Driving SPI pins low before sleep to attempt to lower microSD card stand-by current
+        //Pins: 10, 11, 12, 13
+        for (byte x = 10 ; x < 14 ; x++)
+        {
+          pinMode(x, OUTPUT);
+          digitalWrite(x, LOW);
+        }
+
         sleep_mode(); //Stop everything and go to sleep. Wake up if serial character received
 
         power_spi_enable(); //After wake up, power up peripherals
@@ -511,6 +520,15 @@ byte appendFile(char* fileName)
 
       power_timer0_disable(); //Shut down peripherals we don't need
       power_spi_disable();
+
+      //Driving SPI pins low before sleep to attempt to lower microSD card stand-by current
+      //Pins: 10, 11, 12, 13
+      for (byte x = 10 ; x < 14 ; x++)
+      {
+        pinMode(x, OUTPUT);
+        digitalWrite(x, LOW);
+      }
+
       sleep_mode(); //Stop everything and go to sleep. Wake up if serial character received
 
       power_spi_enable(); //After wake up, power up peripherals
@@ -525,9 +543,9 @@ byte appendFile(char* fileName)
   workingFile.sync();
 
   //Remove the escape characters from the end of the file
-  if(setting_max_escape_character > 0) 
+  if (setting_max_escape_character > 0)
     workingFile.truncate(workingFile.fileSize() - setting_max_escape_character);
-  
+
   workingFile.close(); // Done recording, close out the file
 
   digitalWrite(stat1, LOW); // Turn off indicator LED
@@ -1708,7 +1726,7 @@ byte readLine(char* buffer, byte bufferLength)
       //To capture the escape command and immediately record
       //the buffer then stop asking for input from user
       //See issue 168: https://github.com/sparkfun/OpenLog/issues/168
-    }*/
+      }*/
     else {
       buffer[readLength] = c;
       ++readLength;
@@ -2110,33 +2128,33 @@ byte wildcmp(const char* wild, const char* string)
 #define DIR_SIZE            (sizeof(dir_t))
 
 /*
- * NAME:
- *  void lsPrint(SdFile * theDir, char * cmdStr, byte flags, byte indent)
- *
- * PARAMETERS:
- *  SdFile * theDir = the directory to list (assumed opened)
- *  char * cmdStr = the command line file/directory string (with possible wildcards)
- *  byte flags = the inclusive OR of
- *                  LS_SIZE - print the file size
- *                  LS_R - recursively list subdirectories
- *  byte indent = amount of space before file name
- *                (used for recursive list to indicate subdirectory level)
- *
- * WHAT:
- *  List directory contents to serial port.
- *
- *  Wildcard support rules:
- *    Wildcard characters ('*', '?') only apply to the selection of filenames to
- *    list, not to the listing of directory or subdirectory names. All directory
- *    and subdirectory names are always listed.
- *
- * RETURN VALUES:
- *  None.
- *
- * SPECIAL CONSIDERATIONS:
- *  May be called recursively with limited recursion depth (see FOLDER_TRACK_DEPTH).
- *  Each recursion uses ~50 bytes of RAM.
- */
+   NAME:
+    void lsPrint(SdFile * theDir, char * cmdStr, byte flags, byte indent)
+
+   PARAMETERS:
+    SdFile * theDir = the directory to list (assumed opened)
+    char * cmdStr = the command line file/directory string (with possible wildcards)
+    byte flags = the inclusive OR of
+                    LS_SIZE - print the file size
+                    LS_R - recursively list subdirectories
+    byte indent = amount of space before file name
+                  (used for recursive list to indicate subdirectory level)
+
+   WHAT:
+    List directory contents to serial port.
+
+    Wildcard support rules:
+      Wildcard characters ('*', '?') only apply to the selection of filenames to
+      list, not to the listing of directory or subdirectory names. All directory
+      and subdirectory names are always listed.
+
+   RETURN VALUES:
+    None.
+
+   SPECIAL CONSIDERATIONS:
+    May be called recursively with limited recursion depth (see FOLDER_TRACK_DEPTH).
+    Each recursion uses ~50 bytes of RAM.
+*/
 //void lsPrint(SdFile * theDir, char * cmdStr, byte flags, byte indent)
 void lsPrint(FatFile * theDir, char * cmdStr, byte flags, byte indent)
 {
@@ -2168,32 +2186,32 @@ void lsPrint(FatFile * theDir, char * cmdStr, byte flags, byte indent)
 }
 
 /*
- * NAME:
- *  void lsPrintNext(SdFile * theDir, char * cmdStr, byte flags, byte indent)
- *
- * PARAMETERS:
- *  SdFile * theDir = the directory to list (assumed opened)
- *  char * cmdStr = the command line file/directory string (with possible wildcards)
- *  byte flags = the inclusive OR of
- *                  LS_SIZE - print the file size
- *                  LS_R - recursively list subdirectories
- *  byte indent = amount of space before file name
- *                (used for recursive list to indicate subdirectory level)
- *
- * WHAT:
- *  List directory's next contents to serial port.
- *
- *  Wildcard support rules:
- *    Wildcard characters ('*', '?') only apply to the selection of filenames to
- *    list, not to the listing of directory or subdirectory names. All directory
- *    and subdirectory names are always listed.
- *
- * RETURN VALUES:
- *  byte = WAS_EOF - EOF, WAS_FILE - normal file, or WAS_SUBDIR - subdirectory
- *
- * SPECIAL CONSIDERATIONS:
- *  None.
- */
+   NAME:
+    void lsPrintNext(SdFile * theDir, char * cmdStr, byte flags, byte indent)
+
+   PARAMETERS:
+    SdFile * theDir = the directory to list (assumed opened)
+    char * cmdStr = the command line file/directory string (with possible wildcards)
+    byte flags = the inclusive OR of
+                    LS_SIZE - print the file size
+                    LS_R - recursively list subdirectories
+    byte indent = amount of space before file name
+                  (used for recursive list to indicate subdirectory level)
+
+   WHAT:
+    List directory's next contents to serial port.
+
+    Wildcard support rules:
+      Wildcard characters ('*', '?') only apply to the selection of filenames to
+      list, not to the listing of directory or subdirectory names. All directory
+      and subdirectory names are always listed.
+
+   RETURN VALUES:
+    byte = WAS_EOF - EOF, WAS_FILE - normal file, or WAS_SUBDIR - subdirectory
+
+   SPECIAL CONSIDERATIONS:
+    None.
+*/
 //byte lsPrintNext(SdFile * theDir, char * cmdStr, byte flags, byte indent)
 byte lsPrintNext(FatFile * theDir, char * cmdStr, byte flags, byte indent)
 {
