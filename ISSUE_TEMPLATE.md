@@ -11,8 +11,8 @@ Describe your issue here.
 ### Steps to reproduce
 Tell us how to reproduce this issue. Please post stripped down example code demonstrating your issue to a gist.
 
-### Expected behaviour
+### Expected behavior
 Tell us what should happen
 
-### Actual behaviour
+### Actual behavior
 Tell us what happens instead
