@@ -699,7 +699,8 @@ void readSystemSettings(void)
   //Read whether we should use verbose responses or not
   //Default is true
   setting_verbose = EEPROM.read(LOCATION_VERBOSE);
-  if (setting_verbose != ON && setting_verbose != OFF)
+  //if (setting_verbose != ON && setting_verbose != OFF)
+  if (setting_verbose > 1) //0 or 1 are the only valid options
   {
     setting_verbose = ON; //Reset verbose to true
     EEPROM.write(LOCATION_VERBOSE, setting_verbose);
@@ -708,7 +709,8 @@ void readSystemSettings(void)
   //Read whether we should echo characters or not
   //Default is true
   setting_echo = EEPROM.read(LOCATION_ECHO);
-  if (setting_echo != ON || setting_echo != OFF)
+  //if (setting_echo != ON || setting_echo != OFF)
+  if (setting_echo > 1) //0 or 1 are the only valid options
   {
     setting_echo = ON; //Reset to echo on
     EEPROM.write(LOCATION_ECHO, setting_echo);
@@ -2288,4 +2290,3 @@ void toggleLED(byte pinNumber)
   if (digitalRead(pinNumber)) digitalWrite(pinNumber, LOW);
   else digitalWrite(pinNumber, HIGH);
 }
-
