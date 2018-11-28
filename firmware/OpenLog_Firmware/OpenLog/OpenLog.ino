@@ -1743,7 +1743,7 @@ byte readLine(char* buffer, byte bufferLength)
 
 void printMenu(void)
 {
-  NewSerial.println(F("OpenLog v4.1"));
+  NewSerial.println(F("OpenLog v4.2"));
   NewSerial.println(F("Basic commands:"));
   NewSerial.println(F("new <file>\t\t: Creates <file>"));
   NewSerial.println(F("append <file>\t\t: Appends text to end of <file>"));
