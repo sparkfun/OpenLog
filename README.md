@@ -1,7 +1,7 @@
 SparkFun OpenLog
 ================
 
-![OpenLog](https://cdn.sparkfun.com//assets/parts/1/1/2/0/2/13712-01a.jpg)  
+![OpenLog](https://cdn.sparkfun.com/r/300-300/assets/parts/1/1/2/0/2/13712-01a.jpg)  
 
 [*OpenLog (DEV-13712)*](https://www.sparkfun.com/products/13712 )
 
