@@ -1,9 +1,9 @@
 SparkFun OpenLog
 ================
 
-![OpenLog](https://cdn.sparkfun.com/r/300-300/assets/parts/1/1/2/0/2/13712-01a.jpg)  
+[![OpenLog](https://cdn.sparkfun.com/r/300-300/assets/parts/1/1/2/0/2/13712-01a.jpg)  ](https://www.sparkfun.com/products/13712)
 
-[*OpenLog (DEV-13712)*](https://www.sparkfun.com/products/13712 )
+[*SparkFun OpenLog (DEV-13712)*](https://www.sparkfun.com/products/13712)
 
 OpenLog is an open source data logger that works over a simple serial connection and supports microSD cards up to 64GB. 
 
