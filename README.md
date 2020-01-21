@@ -1,18 +1,14 @@
 SparkFun OpenLog
 ================
 
-
-
-
-
 <table class="table table-hover table-striped table-bordered">
   <tr align="center">
-   <td><a href="https://www.sparkfun.com/products/13712"><img src="https://cdn.sparkfun.com//assets/parts/1/1/2/0/2/13712-SparkFun_OpenLog-01.jpg" alt=""></a></td>
-   <td><a href="https://www.sparkfun.com/products/13955"><img src="https://cdn.sparkfun.com//assets/parts/1/1/6/6/3/13955-SparkFun_OpenLog_with_headers-01.jpg" alt=""></a></td>
+   <td><a href="https://www.sparkfun.com/products/13712"><img src="https://cdn.sparkfun.com//assets/parts/1/1/2/0/2/13712-SparkFun_OpenLog-01.jpg" alt="SparkFun OpenLog"></a></td>
+   <td><a href="https://www.sparkfun.com/products/13955"><img src="https://cdn.sparkfun.com//assets/parts/1/1/6/6/3/13955-SparkFun_OpenLog_with_headers-01.jpg" alt="SparkFun OpenLog with Headers"></a></td>
   </tr>
   <tr align="center">
-    <td><i>SparkFun OpenLog (DEV-13712)</i></td>
-    <td><i>SparkFun OpenLog with Headers (DEV-13955)</i></td>
+    <td><i>SparkFun OpenLog (<a href="https://www.sparkfun.com/products/13712">DEV-13712</a>)</i></td>
+    <td><i>SparkFun OpenLog with Headers (<a href="https://www.sparkfun.com/products/13955">DEV-13955</a>)</i></td>
   </tr>
 </table>
 
