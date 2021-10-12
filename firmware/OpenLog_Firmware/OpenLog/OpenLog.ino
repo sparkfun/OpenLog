@@ -7,7 +7,8 @@
   http://creativecommons.org/licenses/by-sa/3.0/
   Feel free to use, distribute, and sell varients of OpenLog. All we ask is that you include attribution of 'Based on OpenLog by SparkFun'.
 
-  OpenLog is based on the work of Bill Greiman and sdfatlib: https://github.com/greiman/SdFat-beta
+  OpenLog is based on the work of Bill Greiman and sdfatlib. Currently SDFat v1.1.4: https://github.com/greiman/SdFat/releases/tag/1.1.4
+  SerialPort is the work of Bill Greiman and is used to increase the size of the RX buffer: https://github.com/greiman/SerialPort
 
   OpenLog is a simple serial logger based on the ATmega328 running at 16MHz. The whole purpose of this
   logger was to create a logger that just powered up and worked. OpenLog ships with an Arduino/Optiboot
@@ -65,7 +66,7 @@
 
 #include <SPI.h>
 #include <SdFat.h> //We do not use the built-in SD.h file because it calls Serial.print
-#include <SerialPort.h> //This is a new/beta library written by Bill Greiman. You rock Bill!
+#include <SerialPort.h> //This is a new/beta library written by Bill Greiman. You rock Bill! https://github.com/greiman/SerialPort
 #include <EEPROM.h>
 #include <FreeStack.h> //Allows us to print the available stack/RAM size
 
@@ -95,11 +96,11 @@ SerialPort<0, 512, 0> NewSerial;
 
 void(* Reset_AVR) (void) = 0; //Way of resetting the ATmega
 
-#define CFG_FILENAME "config.txt" //This is the name of the file that contains the unit settings
+#define CFG_FILENAME "config.txt\0" //This is the name of the file that contains the unit settings
 
-#define MAX_CFG "115200,103,214,0,1,1,0\0" //= 115200 bps, escape char of ASCII(103), 214 times, new log mode, verbose on, echo on, ignore RX false. 
+#define MAX_CFG "115200,255,255,1,1,1,1,255,255\0" // This is used to calculate the longest possible configuration string. These actual values are not used
 #define CFG_LENGTH (strlen(MAX_CFG) + 1) //Length of text found in config file. strlen ignores \0 so we have to add it back 
-#define SEQ_FILENAME "SEQLOG00.TXT" //This is the name for the file when you're in sequential mode
+#define SEQ_FILENAME "SEQLOG00.TXT\0" //This is the name for the file when you're in sequential mode
 
 //Internal EEPROM locations for the user settings
 #define LOCATION_SYSTEM_SETTING		  0x02
@@ -113,6 +114,8 @@ void(* Reset_AVR) (void) = 0; //Way of resetting the ATmega
 #define LOCATION_BAUD_SETTING_MID	  0x0A
 #define LOCATION_BAUD_SETTING_LOW	  0x0B
 #define LOCATION_IGNORE_RX		      0x0C
+#define LOCATION_MAX_FILESIZE_MB    0x0D    // In MODE_ROTATE, this is the maximum size (in MB) that a file is allowed to grow to before starting a new file
+#define LOCATION_MAX_FILENUMBER     0x0E    // In MODE_ROTATE, this is the highest allowed value of newFileNumer in NeLog() before wrapping around to zero
 
 #define BAUD_MIN  300
 #define BAUD_MAX  1000000
@@ -120,6 +123,8 @@ void(* Reset_AVR) (void) = 0; //Way of resetting the ATmega
 #define MODE_NEWLOG	    0
 #define MODE_SEQLOG     1
 #define MODE_COMMAND    2
+#define MODE_ROTATE     3                 // Like NEWLOG, but fills a fixed set of files (settable from config) then starts overwriting oldest ones
+#define MODE_MAX_VALID_MODE MODE_ROTATE   // If adding a new mode, set this to the last good mode number
 
 const byte stat1 = 5;  //This is the normal status LED
 const byte stat2 = 13; //This is the SPI LED, indicating SD traffic
@@ -157,6 +162,8 @@ byte setting_max_escape_character; //Number of escape chars before break logging
 byte setting_verbose; //This controls the whether we get extended or simple responses.
 byte setting_echo; //This turns on/off echoing at the command prompt
 byte setting_ignore_RX; //This flag, when set to 1 will make OpenLog ignore the state of the RX pin when powering up
+byte setting_max_filesize_MB; // In MODE_ROTATE, the maximum number of MB that a file is allowed to grow to
+byte setting_max_filenumber;  // In MODE_ROTATE, the maximum file number before wrapping around to 0
 
 //The number of command line arguments
 //Increase to support more arguments but be aware of the memory restrictions
@@ -232,6 +239,13 @@ void setup(void)
   }
   NewSerial.print(F("1"));
 
+#if DEBUG
+  NewSerial.print(F("MaxFilesize from EEPROM: "));
+  NewSerial.println(setting_max_filesize_MB);
+  NewSerial.print(F("MaxFilenumber from EEPROM: "));
+  NewSerial.println(setting_max_filenumber);
+#endif
+
   //Setup SD & FAT
   if (!sd.begin(SD_CHIP_SELECT, SPI_FULL_SPEED)) systemError(ERROR_CARD_INIT);
   if (!sd.chdir()) systemError(ERROR_ROOT_INIT); //Change to root directory. All new file creation will be in root.
@@ -254,21 +268,29 @@ void setup(void)
 void loop(void)
 {
   //If we are in new log mode, find a new file name to write to
-  if (setting_systemMode == MODE_NEWLOG)
-    appendFile(newLog()); //Append the file name that newLog() returns
+  if (setting_systemMode == MODE_NEWLOG || setting_systemMode == MODE_ROTATE)
+  {
+    //If in MODE_NEWLOG, then just append the file name that newLog() returns and ignore return value of appendFile()
+    //If in MODE_ROTATE, then as long as appendFile() keeps returning 0 (meaning the file is full and a new one
+    //  needs to be started) keep creating new files and logging new data. If appendFile() returns a 1 then the escape
+    //  sequence has been triggered so drop out of this while() loop and let commandShell() run.
+    while ((appendFile(newLog()) == 0) && (setting_systemMode == MODE_ROTATE))
+    { } // While loop purposely empty
+  }
 
   //If we are in sequential log mode, determine if seqLog.txt has been created or not, and then open it for logging
   if (setting_systemMode == MODE_SEQLOG)
     seqLog();
 
-  //Once either one of these modes exits, go to normal command mode, which is called by returning to main()
+  //Once either one of these modes exits, go to normal command mode, which is called by returning to loop()
   commandShell();
 }
 
 //Log to a new file everytime the system boots
 //Checks the spots in EEPROM for the next available LOG# file name
 //Updates EEPROM and then appends to the new log file.
-//Limited to 65535 files but this should not always be the case.
+//In MODE_NEWLOG and MODE_SEQLOG, limited to 65535 files but this should not always be the case.
+//In MODE_ROTATE maximum number is limited to setting_max_filenumber before wrapping around to 0
 char* newLog(void)
 {
   byte msb, lsb;
@@ -303,6 +325,12 @@ char* newLog(void)
     return (0); //Bail!
   }
 
+  // For MODE_ROTATE, we want to loop back around to filenmber 0 if we've gone beyond what our maximum is
+  if ((setting_systemMode == MODE_ROTATE) && (newFileNumber > setting_max_filenumber))
+  {
+    newFileNumber = 0;
+  }
+
   //If we made it this far, everything looks good - let's start testing to see if our file number is the next available
 #if DEBUG
   NewSerial.print(F("Found file number: "));
@@ -311,42 +339,54 @@ char* newLog(void)
 
   //There is a weird EEPROM power-up glitch that causes the newFileNumber to advance
   //arbitrarily. This fixes that problem.
-  if (newFileNumber > 0) newFileNumber--;
+  /// TODO: (BPS) I don't understand why this is here. Your file number is then always one less than what's in EEPROM, which doesn't make sense.
+  /// I'm commenting this out so that we always use the actual filenumber stored in EEPROM
+  //  if (newFileNumber > 0) newFileNumber--;
 
-  //Search for next available log spot
   static char newFileName[13]; //Bug fix from ystark's pull request: https://github.com/sparkfun/OpenLog/pull/189
-  while (1)
+
+  // When in MODE_ROTATE, we don't care if the file exists, or if it is empty, or anything. We will always
+  // blindly create whatever the next filename is and use it.
+  if (setting_systemMode == MODE_ROTATE)
   {
     sprintf_P(newFileName, PSTR("LOG%05u.TXT"), newFileNumber); //Splice the new file number into this file name
-
-    // O_CREAT - create the file if it does not exist
-    // O_APPEND - seek to the end of the file prior to each write
-    // O_WRITE - open for write
-    // O_EXCL - if O_CREAT and O_EXCEL are set, open() shall fail if file exists
-
-    //Try to open file, if it opens (file doesn't exist), then break
-    if (newFile.open(newFileName, O_CREAT | O_EXCL | O_WRITE)) break;
-
-    //Try to open file and see if it is empty. If so, use it.
-    if (newFile.open(newFileName, O_READ))
-    {
-      if (newFile.fileSize() == 0)
-      {
-        newFile.close();        // Close this existing file we just opened.
-        return (newFileName); // Use existing empty file.
-      }
-      newFile.close(); // Close this existing file we just opened.
-    }
-
-    //Try the next number
-    newFileNumber++;
-    if (newFileNumber > 65533) //There is a max of 65534 logs
-    {
-      NewSerial.print(F("!Too many logs:2!"));
-      return (0); //Bail!
-    }
   }
-  newFile.close(); //Close this new file we just opened
+  else
+  {
+    // For all other modes, search for next available log spot
+    while (1)
+    {
+      sprintf_P(newFileName, PSTR("LOG%05u.TXT"), newFileNumber); //Splice the new file number into this file name
+
+      // O_CREAT - create the file if it does not exist
+      // O_APPEND - seek to the end of the file prior to each write
+      // O_WRITE - open for write
+      // O_EXCL - if O_CREAT and O_EXCEL are set, open() shall fail if file exists
+
+      //Try to open file, if it opens (file doesn't exist), then break
+      if (newFile.open(newFileName, O_CREAT | O_EXCL | O_WRITE)) break;
+
+      //Try to open file and see if it is empty. If so, use it.
+      if (newFile.open(newFileName, O_READ))
+      {
+        if (newFile.fileSize() == 0)
+        {
+          newFile.close();        // Close this existing file we just opened.
+          return (newFileName); // Use existing empty file.
+        }
+        newFile.close(); // Close this existing file we just opened.
+      }
+
+      //Try the next number
+      newFileNumber++;
+      if (newFileNumber > 65533) //There is a max of 65534 logs
+      {
+        NewSerial.print(F("!Too many logs:2!"));
+        return (0); //Bail!
+      }
+    }
+    newFile.close(); //Close this new file we just opened
+  }
 
   newFileNumber++; //Increment so the next power up uses the next file #
 
@@ -380,7 +420,7 @@ void seqLog(void)
 {
   SdFile seqFile;
 
-  char sequentialFileName[strlen(SEQ_FILENAME)]; //Limited to 8.3
+  char sequentialFileName[strlen(SEQ_FILENAME) + 1]; //Limited to 8.3
   strcpy_P(sequentialFileName, PSTR(SEQ_FILENAME)); //This is the name of the config file. 'config.sys' is probably a bad idea.
 
   //Try to create sequential file
@@ -398,17 +438,37 @@ void seqLog(void)
 //This is the most important function of the device. These loops have been tweaked as much as possible.
 //Modifying this loop may negatively affect how well the device can record at high baud rates.
 //Appends a stream of serial data to a given file
-//Does not exit until escape character is received the correct number of times
-//Returns 0 on error
-//Returns 1 on success
+//Does not exit until escape character is received the correct number of times, or if the systemMode is MODE_ROTATE
+//  and the current file has gotten too big. Then the file is closed and this function returns.
+//Returns 0 if SysteMode is MODE_ROTATE and enough bytes have been written to the file so the file is now closed
+//Returns 1 if the excape sequence has been detected
 byte appendFile(char* fileName)
 {
   SdFile workingFile;
+  unsigned long totalBytesWritten = 0;  // Keeps track of the total number of bytes written to the file for MODE_ROTATE
+  unsigned long maxFilesizeBytes = ((unsigned long)setting_max_filesize_MB * (unsigned long)(1048576)); // Cache this for laster
 
-  // O_CREAT - create the file if it does not exist
-  // O_APPEND - seek to the end of the file prior to each write
-  // O_WRITE - open for write
-  if (!workingFile.open(fileName, O_CREAT | O_APPEND | O_WRITE)) systemError(ERROR_FILE_OPEN);
+#if DEBUG
+  NewSerial.print(F("setting_max_filesize_MB: "));
+  NewSerial.println(setting_max_filesize_MB);
+  NewSerial.print(F("maxFileSizeBytes: "));
+  NewSerial.println(maxFilesizeBytes);
+#endif
+
+  if (setting_systemMode != MODE_ROTATE)
+  {
+    // O_CREAT - create the file if it does not exist
+    // O_APPEND - seek to the end of the file prior to each write
+    // O_WRITE - open for write
+    if (!workingFile.open(fileName, O_CREAT | O_APPEND | O_WRITE)) systemError(ERROR_FILE_OPEN);
+  }
+  else
+  {
+    // O_CREAT - create the file if it does not exist
+    // O_TRUNC - truncate the file to zero length
+    // O_WRITE - open for write
+    if (!workingFile.open(fileName, O_CREAT | O_TRUNC | O_WRITE)) systemError(ERROR_FILE_OPEN);
+  }
 
   if (workingFile.fileSize() == 0) {
     //This is a trick to make sure first cluster is allocated - found in Bill's example/beta code
@@ -435,20 +495,37 @@ byte appendFile(char* fileName)
   digitalWrite(stat1, HIGH); //Turn on indicator LED
 
   //Check if we should ignore escape characters
-  //If we are ignoring escape characters the recording loop is infinite and can be made shorter (less checking)
+  //If we are ignoring escape characters the recording loop is infinite (excpet if we are in MODE_ROTATE) and can be made shorter (less checking)
   //This should allow for recording at higher incoming rates
   if (setting_max_escape_character == 0)
   {
     //Start recording incoming characters
-    //With no escape characters, do this infinitely
+    //With no escape characters, do this infinitely except if in MODE_ROTATE
     while (1)
     {
       byte charsToRecord = NewSerial.read(localBuffer, sizeof(localBuffer)); //Read characters from global buffer into the local buffer
-      if (charsToRecord > 0) //If we have characters, check for escape characters
+      if (charsToRecord > 0)
       {
         workingFile.write(localBuffer, charsToRecord); //Record the buffer to the card
 
         toggleLED(stat1); //Toggle the STAT1 LED each time we record the buffer
+
+        // For MODE_ROTATE, we need to keep track of how many bytes we have written to the file.
+        // When it gets more than setting_max_filesize_MB, we exit (so as to close this file and start another)
+        if (setting_systemMode == MODE_ROTATE)
+        {
+          totalBytesWritten += charsToRecord; // Add these new bytes to our running total
+          if (totalBytesWritten >= maxFilesizeBytes)
+          {
+            workingFile.sync();
+            workingFile.close(); // Done recording, close out the file
+
+            digitalWrite(stat1, LOW); // Turn off indicator LED
+
+            NewSerial.print(F("~")); // Indicate a successful record
+            return (0); // Indicate to caller that we are done writing to this file and desire another
+          }
+        }
       }
       //No characters received?
       else if ( (millis() - lastSyncTime) > MAX_IDLE_TIME_MSEC) //If we haven't received any characters in 2s, goto sleep
@@ -510,6 +587,23 @@ byte appendFile(char* fileName)
       workingFile.write(localBuffer, charsToRecord); //Record the buffer to the card
 
       toggleLED(stat1); //Toggle the STAT1 LED each time we record the buffer
+
+      // For MODE_ROTATE, we need to keep track of how many bytes we have written to the file.
+      // When it gets more than setting_max_filesize_MB, we exit (so as to close this file and start another)
+      if (setting_systemMode == MODE_ROTATE)
+      {
+        totalBytesWritten += charsToRecord; // Add these new bytes to our running total
+        if (totalBytesWritten >= maxFilesizeBytes)
+        {
+          workingFile.sync();
+          workingFile.close(); // Done recording, close out the file
+
+          digitalWrite(stat1, LOW); // Turn off indicator LED
+
+          NewSerial.print(F("~")); // Indicate a successful record
+          return (0); // Indicate to caller that we are done writing to this file and desire another
+        }
+      }
     }
     //No characters recevied?
     else if ( (millis() - lastSyncTime) > MAX_IDLE_TIME_MSEC) //If we haven't received any characters in 2s, goto sleep
@@ -537,7 +631,6 @@ byte appendFile(char* fileName)
       escapeCharsReceived = 0; // Clear the esc flag as it has timed out
       lastSyncTime = millis(); //Reset the last sync time to now
     }
-
   }
 
   workingFile.sync();
@@ -552,7 +645,7 @@ byte appendFile(char* fileName)
 
   NewSerial.print(F("~")); // Indicate a successful record
 
-  return (1); //Success!
+  return (1); // Exit to command mode now since excape sequence seen
 }
 
 //The following are system functions needed for basic operation
@@ -652,6 +745,12 @@ void setDefaultSettings(void)
   //Reset the ignore RX to 'Pay attention to RX!'
   EEPROM.write(LOCATION_IGNORE_RX, OFF);
 
+  // Set the maximum filesize in rotate mode to 100MB
+  EEPROM.write(LOCATION_MAX_FILESIZE_MB, 100);
+
+  // Set the maximum number of files in rotate mode to 60
+  EEPROM.write(LOCATION_MAX_FILENUMBER, 60);
+
   //These settings are not recorded to the config file
   //We can't do it here because we are not sure the FAT system is init'd
 }
@@ -672,7 +771,7 @@ void readSystemSettings(void)
   //Determine the system mode we should be in
   //Default is NEWLOG mode
   setting_systemMode = EEPROM.read(LOCATION_SYSTEM_SETTING);
-  if (setting_systemMode > 5)
+  if (setting_systemMode > MODE_MAX_VALID_MODE)
   {
     setting_systemMode = MODE_NEWLOG; //By default, unit will turn on and go to new file logging
     EEPROM.write(LOCATION_SYSTEM_SETTING, setting_systemMode);
@@ -736,6 +835,10 @@ void readSystemSettings(void)
     setting_ignore_RX = OFF; //By default we DO NOT ignore RX
     EEPROM.write(LOCATION_IGNORE_RX, setting_ignore_RX);
   }
+
+  // Readin the max filesize and max filenumber values used in MODE_ROTATE
+  setting_max_filesize_MB = EEPROM.read(LOCATION_MAX_FILESIZE_MB);
+  setting_max_filenumber = EEPROM.read(LOCATION_MAX_FILENUMBER);
 }
 
 void readConfigFile(void)
@@ -744,7 +847,7 @@ void readConfigFile(void)
 
   if (!sd.chdir()) systemError(ERROR_ROOT_INIT); // open the root directory
 
-  char configFileName[strlen(CFG_FILENAME)]; //Limited to 8.3
+  char configFileName[strlen(CFG_FILENAME) + 1]; //Limited to 8.3
   strcpy_P(configFileName, PSTR(CFG_FILENAME)); //This is the name of the config file. 'config.sys' is probably a bad idea.
 
   //Check to see if we have a config file
@@ -766,10 +869,10 @@ void readConfigFile(void)
   NewSerial.println(F("Found config file!"));
 #endif
 
-  //Read up to 22 characters from the file. There may be a better way of doing this...
+  //Read up to CFG_LENGTH characters from the file. There may be a better way of doing this...
   char c;
-  int len;
-  byte settingsString[CFG_LENGTH]; //"115200,103,14,0,1,1,0\r" = 115200 bps, escape char of ASCII(103), 14 times, new log mode, verbose on, echo on, ignore RX false.
+  uint8_t len;
+  byte settingsString[CFG_LENGTH];
   for (len = 0 ; len < CFG_LENGTH ; len++) {
     c = configFile.read();
     if (!(c == ',' || (c >= '0' && c <= '9'))) break; //Bail if we hit a non-numeric or non-comma character
@@ -796,6 +899,8 @@ void readConfigFile(void)
   byte new_system_verbose = ON;
   byte new_system_echo = ON;
   byte new_system_ignore_RX = OFF;
+  byte new_setting_max_filesize_MB = 100;
+  byte new_setting_max_filenumber = 100;
 
   //Parse the settings out
   byte i = 0, j = 0, settingNumber = 0;
@@ -835,7 +940,7 @@ void readConfigFile(void)
     else if (settingNumber == 3) //System mode
     {
       new_systemMode = newSettingInt;
-      if (new_systemMode == 0 || new_systemMode > MODE_COMMAND) new_systemMode = MODE_NEWLOG; //Default is NEWLOG
+      if (new_systemMode == 0 || new_systemMode > MODE_MAX_VALID_MODE) new_systemMode = MODE_NEWLOG; //Default is NEWLOG
     }
     else if (settingNumber == 4) //Verbose setting
     {
@@ -851,6 +956,22 @@ void readConfigFile(void)
     {
       new_system_ignore_RX = newSettingInt;
       if (new_system_ignore_RX != ON && new_system_ignore_RX != OFF) new_system_ignore_RX = OFF; //Default is to listen to RX
+    }
+    else if (settingNumber == 7) // Rotate mode max filesize in MB setting
+    {
+      new_setting_max_filesize_MB = newSettingInt;
+#if DEBUG
+      NewSerial.print(F("MaxFilesize from file: "));
+      NewSerial.println(new_setting_max_filesize_MB);
+#endif
+    }
+    else if (settingNumber == 8) // Rotate mode max filenumber setting
+    {
+      new_setting_max_filenumber = newSettingInt;
+#if DEBUG
+      NewSerial.print(F("MaxFilenumber from file: "));
+      NewSerial.println(new_setting_max_filenumber);
+#endif
     }
     else
       //We're done! Stop looking for settings
@@ -922,13 +1043,30 @@ void readConfigFile(void)
     recordNewSettings = true;
   }
 
+  if (new_setting_max_filesize_MB != setting_max_filesize_MB) {
+    setting_max_filesize_MB = new_setting_max_filesize_MB;
+    EEPROM.write(LOCATION_MAX_FILESIZE_MB, setting_max_filesize_MB);
+
+    recordNewSettings = true;
+  }
+  if (new_setting_max_filenumber != setting_max_filenumber) {
+    setting_max_filenumber = new_setting_max_filenumber;
+    EEPROM.write(LOCATION_MAX_FILENUMBER, setting_max_filenumber);
+
+    recordNewSettings = true;
+  }
+
   //We don't want to constantly record a new config file on each power on. Only record when there is a change.
-  if (recordNewSettings == true)
+  if (recordNewSettings == true) {
     recordConfigFile(); //If we corrected some values because the config file was corrupt, then overwrite any corruption
 #if DEBUG
+    NewSerial.println(F("EEPROM updated with new values from file"));
+  }
   else
+  {
     NewSerial.println(F("Config file matches system settings"));
 #endif
+  }
 
   //All done! New settings are loaded. System will now operate off new config settings found in file.
 
@@ -953,26 +1091,19 @@ void recordConfigFile(void)
 
   if (!sd.chdir()) systemError(ERROR_ROOT_INIT); // open the root directory
 
-  char configFileName[strlen(CFG_FILENAME)];
+  char configFileName[strlen(CFG_FILENAME) + 1];
   strcpy_P(configFileName, PSTR(CFG_FILENAME)); //This is the name of the config file. 'config.sys' is probably a bad idea.
 
   //If there is currently a config file, trash it
-  if (myFile.open(configFileName, O_WRITE)) {
-    if (!myFile.remove()) {
-      NewSerial.println(F("Remove config failed"));
-      myFile.close(); //Close this file
-      return;
-    }
-  }
-
-  //myFile.close(); //Not sure if we need to close the file before we try to reopen it
+  if (sd.exists(configFileName))
+    sd.remove(configFileName);
 
   //Create config file
   myFile.open(configFileName, O_CREAT | O_APPEND | O_WRITE);
 
   //Config was successfully created, now record current system settings to the config file
 
-  char settingsString[CFG_LENGTH]; //"115200,103,14,0,1,1,0\0" = 115200 bps, escape char of ASCII(103), 14 times, new log mode, verbose on, echo on, ignore RX false.
+  char settingsString[CFG_LENGTH];
 
   //Before we read the EEPROM values, they've already been tested and defaulted in the readSystemSettings function
   long current_system_baud = readBaud();
@@ -982,9 +1113,23 @@ void recordConfigFile(void)
   byte current_system_verbose = EEPROM.read(LOCATION_VERBOSE);
   byte current_system_echo = EEPROM.read(LOCATION_ECHO);
   byte current_system_ignore_RX = EEPROM.read(LOCATION_IGNORE_RX);
+  byte current_system_max_filesize_MB = EEPROM.read(LOCATION_MAX_FILESIZE_MB);
+  byte current_system_max_filenumber = EEPROM.read(LOCATION_MAX_FILENUMBER);
 
   //Convert system settings to visible ASCII characters
-  sprintf_P(settingsString, PSTR("%ld,%d,%d,%d,%d,%d,%d\0"), current_system_baud, current_system_escape, current_system_max_escape, current_systemMode, current_system_verbose, current_system_echo, current_system_ignore_RX);
+  sprintf_P(
+    settingsString,
+    PSTR("%ld,%d,%d,%d,%d,%d,%d,%d,%d\0"),
+    current_system_baud,
+    current_system_escape,
+    current_system_max_escape,
+    current_systemMode,
+    current_system_verbose,
+    current_system_echo,
+    current_system_ignore_RX,
+    current_system_max_filesize_MB,
+    current_system_max_filenumber
+  );
 
   //Record current system settings to the config file
   myFile.write(settingsString, strlen(settingsString));
@@ -992,7 +1137,7 @@ void recordConfigFile(void)
   myFile.println(); //Add a break between lines
 
   //Add a decoder line to the file
-#define HELP_STR "baud,escape,esc#,mode,verb,echo,ignoreRX\0"
+#define HELP_STR "baud,escape,esc#,mode,verb,echo,ignoreRX,maxFilesize,maxFilenum\0"
   char helperString[strlen(HELP_STR) + 1]; //strlen is preprocessed but returns one less because it ignores the \0
   strcpy_P(helperString, PSTR(HELP_STR));
   myFile.write(helperString); //Add this string to the file
@@ -1017,7 +1162,7 @@ long readBaud(void)
   byte uartSpeedMid = EEPROM.read(LOCATION_BAUD_SETTING_MID);
   byte uartSpeedLow = EEPROM.read(LOCATION_BAUD_SETTING_LOW);
 
-  long uartSpeed = 0x00FF0000 & ((long)uartSpeedHigh << 16) | ((long)uartSpeedMid << 8) | uartSpeedLow; //Combine the three bytes
+  long uartSpeed = (0x00FF0000 & ((long)uartSpeedHigh << 16)) | ((long)uartSpeedMid << 8) | uartSpeedLow; //Combine the three bytes
 
   return (uartSpeed);
 }
@@ -1032,10 +1177,10 @@ void commandShell(void)
   SdFile tempFile;
   sd.chdir("/", true); //Change to root directory
 
-  char buffer[30];
+  char commandBuffer[30];
   byte tempVar;
 
-  char parentDirectory[13]; //This tracks the current parent directory. Limited to 13 characters.
+  //char parentDirectory[13]; //This tracks the current parent directory. Limited to 13 characters.
 
 #if DEBUG
   NewSerial.print(F("FreeStack: "));
@@ -1043,7 +1188,7 @@ void commandShell(void)
 #endif
 
 #ifdef INCLUDE_SIMPLE_EMBEDDED
-  uint32_t file_index;
+  //uint32_t file_index;
   byte commandSucceeded = 1;
 #endif //INCLUDE_SIMPLE_EMBEDDED
 
@@ -1059,7 +1204,7 @@ void commandShell(void)
     NewSerial.print(F(">"));
 
     //Read command
-    if (readLine(buffer, sizeof(buffer)) < 1)
+    if (readLine(commandBuffer, sizeof(commandBuffer)) < 1)
     {
 #ifdef INCLUDE_SIMPLE_EMBEDDED
       commandSucceeded = 1;
@@ -1337,7 +1482,7 @@ void commandShell(void)
       //Print file contents from current seek position to the end (readAmount)
       byte c;
       int16_t v;
-      int16_t readSpot = 0;
+      uint16_t readSpot = 0;
       while ((v = tempFile.read()) >= 0) {
         //file.read() returns a 16 bit character. We want to be able to print extended ASCII
         //So we need 8 bit unsigned.
@@ -1412,7 +1557,7 @@ void commandShell(void)
         NewSerial.print(F("<")); //give a different prompt
 
         //read one line of text
-        dataLen = readLine(buffer, sizeof(buffer));
+        dataLen = readLine(commandBuffer, sizeof(commandBuffer));
         if (!dataLen) {
 #ifdef INCLUDE_SIMPLE_EMBEDDED
           commandSucceeded = 1;
@@ -1431,13 +1576,13 @@ void commandShell(void)
         //}
 
         //write text to file
-        if (tempFile.write((byte*) buffer, dataLen) != dataLen) {
+        if (tempFile.write((byte*) commandBuffer, dataLen) != dataLen) {
           if ((feedbackMode & EXTENDED_INFO) > 0)
             NewSerial.println(F("error writing to file"));
           break;
         }
 
-        if (dataLen < (sizeof(buffer) - 1)) tempFile.write("\n\r", 2); //If we didn't fill up the buffer then user must have sent NL. Append new line and return
+        if (dataLen < (sizeof(commandBuffer) - 1)) tempFile.write("\n\r", 2); //If we didn't fill up the buffer then user must have sent NL. Append new line and return
       }
 
       tempFile.close();
@@ -1581,7 +1726,9 @@ void commandShell(void)
         continue;
       //appendFile: Uses circular buffer to capture full stream of text and append to file
 #ifdef INCLUDE_SIMPLE_EMBEDDED
-      commandSucceeded = appendFile(commandArg);
+      // If appendFile() returns, then the write to the file is complete
+      appendFile(commandArg);
+      commandSucceeded = 1;
 #else
       appendFile(commandArg);
 #endif
@@ -1677,9 +1824,9 @@ void commandShell(void)
 }
 
 //Reads a line until the \n enter character is found
-byte readLine(char* buffer, byte bufferLength)
+byte readLine(char* readBuffer, byte bufferLength)
 {
-  memset(buffer, 0, bufferLength); //Clear buffer
+  memset(readBuffer, 0, bufferLength); //Clear buffer
 
   byte readLength = 0;
   while (readLength < bufferLength - 1) {
@@ -1693,7 +1840,7 @@ byte readLine(char* buffer, byte bufferLength)
         continue;
 
       --readLength;
-      buffer[readLength] = '\0'; //Put a terminator on the string in case we are finished
+      readBuffer[readLength] = '\0'; //Put a terminator on the string in case we are finished
 
       NewSerial.print((char)0x08); //Move back one space
       NewSerial.print(F(" ")); //Put a blank there to erase the letter from the terminal
@@ -1708,7 +1855,7 @@ byte readLine(char* buffer, byte bufferLength)
 
     if (c == '\r') {
       NewSerial.println();
-      buffer[readLength] = '\0';
+      readBuffer[readLength] = '\0';
       break;
     }
     else if (c == '\n') {
@@ -1730,20 +1877,33 @@ byte readLine(char* buffer, byte bufferLength)
       //See issue 168: https://github.com/sparkfun/OpenLog/issues/168
       }*/
     else {
-      buffer[readLength] = c;
+      readBuffer[readLength] = c;
       ++readLength;
     }
   }
 
   //Split the command line into arguments
-  splitCmdLineArgs(buffer, bufferLength);
+  splitCmdLineArgs(readBuffer, bufferLength);
 
   return readLength;
 }
 
 void printMenu(void)
 {
-  NewSerial.println(F("OpenLog v4.2"));
+  byte msb, lsb;
+  unsigned int newFileNumber;
+
+  //Combine two 8-bit EEPROM spots into one 16-bit number
+  lsb = EEPROM.read(LOCATION_FILE_NUMBER_LSB);
+  msb = EEPROM.read(LOCATION_FILE_NUMBER_MSB);
+
+  newFileNumber = msb;
+  newFileNumber = newFileNumber << 8;
+  newFileNumber |= lsb;
+
+  NewSerial.println(F("OpenLog v4.3"));
+  NewSerial.print(F("Current FileNumber: "));
+  NewSerial.println(newFileNumber);
   NewSerial.println(F("Basic commands:"));
   NewSerial.println(F("new <file>\t\t: Creates <file>"));
   NewSerial.println(F("append <file>\t\t: Appends text to end of <file>"));
@@ -1815,10 +1975,16 @@ void baudMenu(void)
 
 
 //Change how OpenLog works
-//1) Turn on unit, unit will create new file, and just start logging
-//2) Turn on, append to known file, and just start logging
-//3) Turn on, sit at command prompt
-//4) Resets the newLog file number to zero
+//1) New File Mode: Turn on unit, unit will create new file, and just start logging
+//2) Append File Mode: Turn on, append to known file, and just start logging
+//3) Command Mode: Turn on, sit at command prompt
+//4) Rotate Mode: Turn on, append data to current log file until it becomes to big,
+//    then move on to next, rotating to overwrite first one after max file count has been reached
+//5) Resets the newLog file number to zero
+//6) Change the escape charater
+//7) Change number of escape characters needed to enter command mode
+//8) Change max file size for rotate mode in MB
+//9) Change max number of files in rotate mode
 void systemMenu(void)
 {
   byte systemMode = EEPROM.read(LOCATION_SYSTEM_SETTING);
@@ -1831,6 +1997,7 @@ void systemMenu(void)
     if (systemMode == MODE_NEWLOG) NewSerial.print(F("New file"));
     if (systemMode == MODE_SEQLOG) NewSerial.print(F("Append file"));
     if (systemMode == MODE_COMMAND) NewSerial.print(F("Command"));
+    if (systemMode == MODE_ROTATE) NewSerial.print(F("Rotate"));
     NewSerial.println();
 
     NewSerial.print(F("Current escape character and amount: "));
@@ -1838,13 +2005,21 @@ void systemMenu(void)
     NewSerial.print(F(" x "));
     NewSerial.println(setting_max_escape_character, DEC);
 
-    NewSerial.println(F("Change to:"));
-    NewSerial.println(F("1) New file logging"));
-    NewSerial.println(F("2) Append file logging"));
-    NewSerial.println(F("3) Command prompt"));
-    NewSerial.println(F("4) Reset new file number"));
-    NewSerial.println(F("5) New escape character"));
-    NewSerial.println(F("6) Number of escape characters"));
+    NewSerial.print(F("Rotate mode max file size (MB) and max file count: "));
+    NewSerial.print(setting_max_filesize_MB, DEC);
+    NewSerial.print(F(", "));
+    NewSerial.println(setting_max_filenumber, DEC);
+
+    NewSerial.println(F("Change:"));
+    NewSerial.println(F("1) Mode to new file logging"));
+    NewSerial.println(F("2) Mode to append file logging"));
+    NewSerial.println(F("3) Mode to command prompt"));
+    NewSerial.println(F("4) Mode to rotate logging"));
+    NewSerial.println(F("5) Reset new file number"));
+    NewSerial.println(F("6) Escape character"));
+    NewSerial.println(F("7) Number of escape characters"));
+    NewSerial.println(F("8) Max file size (MB) in rotate mode"));
+    NewSerial.println(F("9) Max file number in rotate mode"));
 
 #if DEBUG
     NewSerial.println(F("a) Clear all user settings"));
@@ -1882,6 +2057,13 @@ void systemMenu(void)
     }
     if (command == '4')
     {
+      NewSerial.println(F("Rotate logging"));
+      EEPROM.write(LOCATION_SYSTEM_SETTING, MODE_ROTATE);
+      recordConfigFile(); //Put this new setting into the config file
+      return;
+    }
+    if (command == '5')
+    {
       NewSerial.println(F("New file number reset to zero"));
       EEPROM.write(LOCATION_FILE_NUMBER_LSB, 0);
       EEPROM.write(LOCATION_FILE_NUMBER_MSB, 0);
@@ -1891,7 +2073,7 @@ void systemMenu(void)
       //EEPROM_write(LOCATION_FILE_NUMBER_MSB, 0xFF);
       return;
     }
-    if (command == '5')
+    if (command == '6')
     {
       NewSerial.print(F("Enter a new escape character: "));
 
@@ -1905,25 +2087,49 @@ void systemMenu(void)
       NewSerial.println(setting_escape_character, DEC);
       return;
     }
-    if (command == '6')
+    if (command == '7')
     {
-      byte choice = 255;
-      while (choice == 255)
+      NewSerial.print(F("\n\rEnter number of escape characters to look for (0 to 255): "));
+      int choice = getSerialByte();
+      if (choice >= 0)
       {
-        NewSerial.print(F("\n\rEnter number of escape characters to look for (0 to 254): "));
-        while (!NewSerial.available()); //Wait for user to hit character
-        choice = NewSerial.read() - '0';
+        setting_max_escape_character = (byte)choice;
+        EEPROM.write(LOCATION_MAX_ESCAPE_CHAR, setting_max_escape_character);
+        recordConfigFile(); //Put this new setting into the config file
       }
-
-      setting_max_escape_character = choice;
-      EEPROM.write(LOCATION_MAX_ESCAPE_CHAR, setting_max_escape_character);
-      recordConfigFile(); //Put this new setting into the config file
 
       NewSerial.print(F("\n\rNumber of escape characters needed: "));
       NewSerial.println(setting_max_escape_character, DEC);
       return;
     }
-
+    if (command == '8')
+    {
+      NewSerial.print(F("\n\rEnter max size of log files in MB (0 to 254): "));
+      int choice = getSerialByte();
+      if (choice >= 0)
+      {
+        setting_max_filesize_MB = choice;
+        EEPROM.write(LOCATION_MAX_FILESIZE_MB, setting_max_filesize_MB);
+        recordConfigFile(); //Put this new setting into the config file
+      }
+      NewSerial.print(F("\n\rMax log file size in rotate mode now (MB): "));
+      NewSerial.println(setting_max_filesize_MB, DEC);
+      return;
+    }
+    if (command == '9')
+    {
+      NewSerial.print(F("\n\rEnter maximum log file number in rotate mode (0 to 255): "));
+      int choice = getSerialByte();
+      if (choice >= 0)
+      {
+        setting_max_filenumber = choice;
+        EEPROM.write(LOCATION_MAX_FILENUMBER, setting_max_filenumber);
+        recordConfigFile(); //Put this new setting into the config file
+      }
+      NewSerial.print(F("\n\rMaximum filenumber in rotate mode: "));
+      NewSerial.println(setting_max_filenumber, DEC);
+      return;
+    }
 #if DEBUG
     //This allows us to reset the EEPROM and config file on a unit to see what would happen to an
     //older unit that is upgraded/reflashed to newest firmware
@@ -1935,12 +2141,14 @@ void systemMenu(void)
       EEPROM.write(LOCATION_FILE_NUMBER_MSB, 0xFF);
       EEPROM.write(LOCATION_ESCAPE_CHAR, 0xFF);
       EEPROM.write(LOCATION_MAX_ESCAPE_CHAR, 0xFF);
+      EEPROM.write(LOCATION_MAX_FILESIZE_MB, 0xFF);
+      EEPROM.write(LOCATION_MAX_FILENUMBER, 0xFF);
 
       //Remove the config file if it is there
       SdFile myFile;
       if (!sd.chdir()) systemError(ERROR_ROOT_INIT); // open the root directory
 
-      char configFileName[strlen(CFG_FILENAME)];
+      char configFileName[strlen(CFG_FILENAME) + 1];
       strcpy_P(configFileName, PSTR(CFG_FILENAME)); //This is the name of the config file. 'config.sys' is probably a bad idea.
 
       //If there is currently a config file, trash it
@@ -2289,4 +2497,30 @@ void toggleLED(byte pinNumber)
 {
   if (digitalRead(pinNumber)) digitalWrite(pinNumber, LOW);
   else digitalWrite(pinNumber, HIGH);
+}
+
+// Read a numerical value from 0 to 255 from the serial port.
+// Return -1 if no value entered or if value entered > 255
+// CR (Enter) or three digits terminate
+int getSerialByte(void)
+{
+  int result = -1;
+  byte c;
+  int val = 0;
+
+  while (1)
+  {
+    while (!NewSerial.available()); //Wait for user to hit character
+    c = NewSerial.read();
+    if (c < '0' || c > '9')
+    {
+      return result;
+    }
+    val = (val * 10) + (c - '0');
+    if (val > 255)
+    {
+      return -1;
+    }
+    result = val;
+  }
 }
