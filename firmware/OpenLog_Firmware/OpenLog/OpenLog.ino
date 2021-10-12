@@ -7,7 +7,8 @@
   http://creativecommons.org/licenses/by-sa/3.0/
   Feel free to use, distribute, and sell varients of OpenLog. All we ask is that you include attribution of 'Based on OpenLog by SparkFun'.
 
-  OpenLog is based on the work of Bill Greiman and sdfatlib: https://github.com/greiman/SdFat-beta
+  OpenLog is based on the work of Bill Greiman and sdfatlib: https://github.com/greiman/SdFat-beta Currently SDFat v1.1.4.
+  SerialPort is the work of Bill Greiman and is used to increase the size of the RX buffer: https://github.com/greiman/SerialPort
 
   OpenLog is a simple serial logger based on the ATmega328 running at 16MHz. The whole purpose of this
   logger was to create a logger that just powered up and worked. OpenLog ships with an Arduino/Optiboot
@@ -65,7 +66,7 @@
 
 #include <SPI.h>
 #include <SdFat.h> //We do not use the built-in SD.h file because it calls Serial.print
-#include <SerialPort.h> //This is a new/beta library written by Bill Greiman. You rock Bill!
+#include <SerialPort.h> //This is a new/beta library written by Bill Greiman. You rock Bill! https://github.com/greiman/SerialPort
 #include <EEPROM.h>
 #include <FreeStack.h> //Allows us to print the available stack/RAM size
 
@@ -870,7 +871,7 @@ void readConfigFile(void)
 
   //Read up to CFG_LENGTH characters from the file. There may be a better way of doing this...
   char c;
-  int len;
+  uint8_t len;
   byte settingsString[CFG_LENGTH];
   for (len = 0 ; len < CFG_LENGTH ; len++) {
     c = configFile.read();
@@ -1168,7 +1169,7 @@ long readBaud(void)
   byte uartSpeedMid = EEPROM.read(LOCATION_BAUD_SETTING_MID);
   byte uartSpeedLow = EEPROM.read(LOCATION_BAUD_SETTING_LOW);
 
-  long uartSpeed = 0x00FF0000 & ((long)uartSpeedHigh << 16) | ((long)uartSpeedMid << 8) | uartSpeedLow; //Combine the three bytes
+  long uartSpeed = (0x00FF0000 & ((long)uartSpeedHigh << 16)) | ((long)uartSpeedMid << 8) | uartSpeedLow; //Combine the three bytes
 
   return (uartSpeed);
 }
@@ -1186,7 +1187,7 @@ void commandShell(void)
   char buffer[30];
   byte tempVar;
 
-  char parentDirectory[13]; //This tracks the current parent directory. Limited to 13 characters.
+  //char parentDirectory[13]; //This tracks the current parent directory. Limited to 13 characters.
 
 #if DEBUG
   NewSerial.print(F("FreeStack: "));
@@ -1194,7 +1195,7 @@ void commandShell(void)
 #endif
 
 #ifdef INCLUDE_SIMPLE_EMBEDDED
-  uint32_t file_index;
+  //uint32_t file_index;
   byte commandSucceeded = 1;
 #endif //INCLUDE_SIMPLE_EMBEDDED
 
@@ -1488,7 +1489,7 @@ void commandShell(void)
       //Print file contents from current seek position to the end (readAmount)
       byte c;
       int16_t v;
-      int16_t readSpot = 0;
+      uint16_t readSpot = 0;
       while ((v = tempFile.read()) >= 0) {
         //file.read() returns a 16 bit character. We want to be able to print extended ASCII
         //So we need 8 bit unsigned.
