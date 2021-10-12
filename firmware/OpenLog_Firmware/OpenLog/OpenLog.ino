@@ -7,7 +7,7 @@
   http://creativecommons.org/licenses/by-sa/3.0/
   Feel free to use, distribute, and sell varients of OpenLog. All we ask is that you include attribution of 'Based on OpenLog by SparkFun'.
 
-  OpenLog is based on the work of Bill Greiman and sdfatlib: https://github.com/greiman/SdFat-beta Currently SDFat v1.1.4.
+  OpenLog is based on the work of Bill Greiman and sdfatlib. Currently SDFat v1.1.4: https://github.com/greiman/SdFat/releases/tag/1.1.4
   SerialPort is the work of Bill Greiman and is used to increase the size of the RX buffer: https://github.com/greiman/SerialPort
 
   OpenLog is a simple serial logger based on the ATmega328 running at 16MHz. The whole purpose of this
@@ -270,7 +270,7 @@ void loop(void)
   //If we are in new log mode, find a new file name to write to
   if (setting_systemMode == MODE_NEWLOG || setting_systemMode == MODE_ROTATE)
   {
-    //If in MODE_NEWLOG, then just append the file name that newLog() returns and aignore return value of appendFile()
+    //If in MODE_NEWLOG, then just append the file name that newLog() returns and ignore return value of appendFile()
     //If in MODE_ROTATE, then as long as appendFile() keeps returning 0 (meaning the file is full and a new one
     //  needs to be started) keep creating new files and logging new data. If appendFile() returns a 1 then the escape 
     //  sequence has been triggered so drop out of this while() loop and let commandShell() run.
