@@ -99,7 +99,7 @@ void(* Reset_AVR) (void) = 0; //Way of resetting the ATmega
 #define CFG_FILENAME "config.txt\0" //This is the name of the file that contains the unit settings
 
 #define MAX_CFG "115200,255,255,1,1,1,1,255,255\0" // This is used to calculate the longest possible configuration string. These actual values are not used
-#define CFG_LENGTH (strlen(MAX_CFG) + 1) //Length of text found in config file. strlen ignores \0 so we have to add it back 
+#define CFG_LENGTH (strlen(MAX_CFG) + 1) //Length of text found in config file. strlen ignores \0 so we have to add it back
 #define SEQ_FILENAME "SEQLOG00.TXT\0" //This is the name for the file when you're in sequential mode
 
 //Internal EEPROM locations for the user settings
@@ -1175,7 +1175,7 @@ long readBaud(void)
 void commandShell(void)
 {
   SdFile tempFile;
-  sd.chdir("/", true); //Change to root directory
+  sd.chdir(); //Change to root directory
 
   char commandBuffer[30];
   byte tempVar;
@@ -1233,8 +1233,18 @@ void commandShell(void)
 #ifdef INCLUDE_SIMPLE_EMBEDDED
       commandSucceeded = 1;
 #endif
-    }
 
+    }
+    else if (strcmp_P(commandArg, PSTR("#")) == 0)
+    {
+      //Print the current file number
+      NewSerial.println(getFileNumber());
+
+#ifdef INCLUDE_SIMPLE_EMBEDDED
+      commandSucceeded = 1;
+#endif
+
+    }
     else if (strcmp_P(commandArg, PSTR("?")) == 0)
     {
       //Print available commands
@@ -1376,6 +1386,7 @@ void commandShell(void)
       uint32_t filesDeleted = 0;
 
       char fname[13]; //Used to store the file and directory names as we step through this directory
+      size_t fsize = 13;
 
       strupr(commandArg);
 
@@ -1384,7 +1395,7 @@ void commandShell(void)
       {
         if (tempFile.isFile()) // Remove only files
         {
-          if (tempFile.getSFN(fname)) // Get the filename of the object we're looking at
+          if (tempFile.getSFN(fname,fsize)) // Get the filename of the object we're looking at
           {
             if (wildcmp(commandArg, fname))  // See if it matches the wildcard
             {
@@ -1650,20 +1661,20 @@ void commandShell(void)
       }
 
       NewSerial.print(F("\n\rVersion: "));
-      NewSerial.print(cid.prv_n, DEC);
+      NewSerial.print(cid.prvN(), DEC);
       NewSerial.print(F("."));
-      NewSerial.println(cid.prv_m, DEC);
+      NewSerial.println(cid.prvM(), DEC);
 
       NewSerial.print(F("Serial number: "));
-      NewSerial.println(cid.psn);
+      NewSerial.println(cid.psn());
 
       NewSerial.print(F("Manufacturing date: "));
-      NewSerial.print(cid.mdt_month);
+      NewSerial.print(cid.mdtMonth());
       NewSerial.print(F("/"));
-      NewSerial.println(2000 + cid.mdt_year_low + (cid.mdt_year_high << 4));
+      NewSerial.println(cid.mdtYear()); // 2000 + cid.mdt_year_low + (cid.mdt_year_high << 4));
 
       csd_t csd;
-      uint32_t cardSize = sd.card()->cardSize();
+      uint32_t cardSize = sd.card()->sectorCount(); // was cardSize();
       if (cardSize == 0 || !sd.card()->readCSD(&csd)) {
         NewSerial.println(F("readCSD failed"));
         continue;
@@ -1886,6 +1897,20 @@ byte readLine(char* readBuffer, byte bufferLength)
   splitCmdLineArgs(readBuffer, bufferLength);
 
   return readLength;
+}
+
+unsigned int getFileNumber(void)
+{
+  byte msb, lsb;
+  unsigned int newFileNumber;
+  //Combine two 8-bit EEPROM spots into one 16-bit number
+  lsb = EEPROM.read(LOCATION_FILE_NUMBER_LSB);
+  msb = EEPROM.read(LOCATION_FILE_NUMBER_MSB);
+  newFileNumber = msb;
+  newFileNumber = newFileNumber << 8;
+  newFileNumber |= lsb;
+
+  return newFileNumber;
 }
 
 void printMenu(void)
@@ -2335,7 +2360,7 @@ byte wildcmp(const char* wild, const char* string)
 #define FILENAME_EXT_SIZE   13
 #define LS_FIELD_SIZE       (FILENAME_EXT_SIZE + 1)
 #define SUBDIR_INDENT       2
-#define DIR_SIZE            (sizeof(dir_t))
+#define DIR_SIZE            (sizeof(DirFat_t))
 
 /*
    NAME:
@@ -2430,12 +2455,13 @@ byte lsPrintNext(FatFile * theDir, char * cmdStr, byte flags, byte indent)
   byte status;            // return status
   SdFile tempFile;
   char fname[FILENAME_EXT_SIZE];
+  size_t fsize = 13;
 
   // Find next available object to display in the specified directory
   while ((open_stat = tempFile.openNext(theDir, O_READ)))
   {
     //    if (tempFile.getFilename(fname)) // Get the filename of the object we're looking at
-    if (tempFile.getSFN(fname)) // Get the filename of the object we're looking at
+    if (tempFile.getSFN(fname,fsize)) // Get the filename of the object we're looking at
     {
       if (tempFile.isDir() || tempFile.isFile() || tempFile.isSubDir())
       {
