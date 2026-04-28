@@ -1,0 +1,4 @@
+(sym_lib_table
+  (version 0)
+  (lib (name "Sparkfun_OpenLog-eagle-import")(type "KiCad")(uri "${KIPRJMOD}/Sparkfun_OpenLog-eagle-import.kicad_sym")(options "")(descr ""))
+)
